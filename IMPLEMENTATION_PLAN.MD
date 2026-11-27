@@ -110,6 +110,8 @@ Repeat this step on development openings. Each iteration starts with the latest 
 
 **Leave step 9 when** the owner is ready to measure a release. Typical reasons include diminishing gains from recent iterations, an agreed effort budget, or a build worth confirming now. The selected candidate must have reproducible development results and a documented rationale. Keep the confirmation openings reserved throughout this loop.
 
+**End each iteration with a recommendation to the owner.** Say explicitly either **Repeat step 9** or **Move to step 10**. Explain how the latest results, remaining uncertainty, and the likely value of another experiment support the recommendation. If repeating, name the next change or test most likely to affect the decision. If moving to step 10, identify the build to freeze and why it is ready for confirmation. The owner decides when to start that match.
+
 ## 10. Confirm the result
 
 Freeze the selected executable, compiler, flags, and any data artifacts. Run a predeclared, fixed-size match between frozen Pandatran and Pandafish v1.0 on the same Pi. Set the sample size from a separate pilot and the smallest lead worth resolving. Pin clocks, resource limits, opening hash, runner configuration, and forfeiture, capping, and pair-recovery rules. Play a separate longer-clock check with its own recorded result.
@@ -121,3 +123,10 @@ Freeze the selected executable, compiler, flags, and any data artifacts. Run a p
 Checkpoint 10 closes the first development cycle and gives future work a measured baseline. Archive the confirmed engine, frozen Pandafish opponent, match settings, openings, and results together so the original result stays reproducible.
 
 Resume step 9 when there is a worthwhile new target or idea. Before restarting, agree on the smallest gain worth pursuing and the development and match time available. Run step 10 again for a later release decision, with a fresh sample from the remaining reserved openings drawn after the candidate and match budget are frozen.
+
+### From Pandafish to Stockfish
+
+1. **Record the Pandafish result in step 10.** Keep frozen Pandafish v1.0 and the original match record as the historical benchmark. If Pandatran keeps winning by a wide margin, or further gains against Pandafish become hard to measure after a confirmed lead, make Stockfish the next development target. During a plateau before confirmation, use Stockfish as a secondary opponent to look for weaknesses while continuing the Pandafish comparison.
+2. **Find a competitive Stockfish setting on development openings.** Pin a Stockfish build and its network, thread count, hash, and clock. Pilot `Skill Level` 7 and 10 with `UCI_LimitStrength` disabled. Move down or up from those levels until a color-swapped pilot puts Pandatran near 50%. Record the exact settings with each result. Stockfish uses randomized weaker move choices at reduced skill levels, so compare match scores at the tested settings. [Stockfish strength controls](https://official-stockfish.github.io/docs/stockfish-wiki/Stockfish-FAQ.html#how-do-skill-level-and-uci_elo-work)
+3. **Repeat step 9 at that level.** Test each change against the strongest accepted Pandatran and check it against the same Stockfish setting. When paired results show a sustained lead, test the strongest build at the next higher setting to find a new competitive match. Compare across both settings during the handoff and keep the old results for continuity.
+4. **Use step 10 for a result worth confirming.** Freeze Pandatran and the exact Stockfish configuration, predeclare the match budget, and draw a fresh reserved sample. Advance while the gains justify the work. Pause when improvements stop paying off.

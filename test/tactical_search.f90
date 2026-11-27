@@ -94,6 +94,9 @@ program tactical_search
   call load('7k/5K2/6Q1/8/8/8/8/8 b - - 150 76')
   call search()
   call check(answer%score == 0 .and. answer%move == 0, 'stalemate terminal scores zero')
+  call load('7k/5K2/8/6Q1/8/8/8/8 w - - 0 1')
+  call search('g5g6')
+  call check(answer%score == 0 .and. control%nodes == 1, 'stalemate at the quiet frontier must precede stand pat')
   call load('8/8/8/5Q2/8/5K2/8/6k1 w - - 0 1')
   call search(depth=3)
   call check(answer%score == mate_score - 3, 'forced mate in two has a three-ply distance')
@@ -152,6 +155,9 @@ contains
     integer, optional, intent(in) :: depth
     integer(int32) :: move
     integer :: occurrences, limit
+    integer(int64) :: expected_nodes
+    logical :: expected_interrupt
+    type(search_result) :: expected
     character(len=:), allocatable :: before
 
     before = to_fen(pos)
@@ -167,7 +173,19 @@ contains
     if (present(nodes)) control%node_limit = nodes
     limit = 1
     if (present(depth)) limit = depth
+    control%mode = history_mode
+    call control%table%clear()
+    call iterative_search(pos, history, legal, limit, control, expected)
+    expected_nodes = control%nodes
+    expected_interrupt = control%interrupted
+    call check(to_fen(pos) == before .and. repetitions(history) == occurrences, 'control restores the root')
+    control%mode = staged_mode
+    call control%table%clear()
     call iterative_search(pos, history, legal, limit, control, answer)
+    call check(answer%depth == expected%depth .and. answer%score == expected%score .and. answer%move == expected%move, &
+      'staged search must match the control decision')
+    call check(control%nodes == expected_nodes .and. (control%interrupted .eqv. expected_interrupt), &
+      'staged search must match the control node work')
     call check(to_fen(pos) == before, 'search restores the board and clocks')
     call check(repetitions(history) == occurrences, 'search restores the root history')
   end subroutine search

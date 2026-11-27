@@ -419,7 +419,7 @@ The control and history modes returned the same move, score, and completed depth
 
 ```sh
 "$pandatran" bench 6 lmr
-"$pandatran" bench 6 | diff -u benchmarks/quiet-history-depth6.txt -
+"$pandatran" bench 6 history | diff -u benchmarks/quiet-history-depth6.txt -
 ```
 
 ### Timed results
@@ -465,3 +465,53 @@ The local artifact directory `.local/checkpoint-09/` holds the release binaries,
 | `history-combined-pandafish.pgn` | `11f7d8ae264c10d4aa2557b4704d438d06c9daeb3606247be926ebd6aa91bedd` |
 | `cp8-longer-pandafish.pgn` | `c210140c64580e07107498e9cf53879a10e71b11734d42dcd52e2cb6e23a4483` |
 | `history-longer-pandafish.pgn` | `f04c6713712f6f74c1d8472a26b3a4519ed55822c896da8f5bddea9f21905075` |
+
+## Step 9 iteration 2 quiescence move generation
+
+In the first iteration’s longer Pandafish match, Pandatran reported a median search depth of six to Pandafish’s seven. A two-second macOS sample of the quiet-history build searching Kiwipete showed move making and attack detection as the most frequent Pandatran leaf symbols. This iteration targets that work at the quiescence frontier. [Quiescence search](https://chessprogramming.org/Quiescence_Search) · [Specialized move generators](https://chessprogramming.org/Move_Generation)
+
+Outside check, the trial proves that at least one legal move exists before allowing stand pat. The probe stops on the first legal candidate. If evaluation reaches a cutoff, it exits there. Otherwise it generates legal captures, en passant, and all four promotions, including quiet promotions, in the same order as the original search. Checked nodes generate all evasions. A possible draw by an intended quiet move uses the full legal list so the search can test the claim. The move list, terminal scores, and draw rules produce the same search tree at fixed depth.
+
+### Fixed search work
+
+All three configurations reproduced the [quiet-history signature](quiet-history-depth6.txt) byte-for-byte, including 899,001 nodes, reduction counts, root moves, scores, and depths. The M2 Mac ran each mode five times in rotating order.
+
+| Executable and mode | Depth-six median |
+| --- | ---: |
+| Frozen quiet-history build | 1.3803 s |
+| Same trial executable in `history` mode | 1.3252 s |
+| Trial executable in `staged` mode | 0.5481 s |
+
+That is 60.3% less time than the frozen build and 58.6% less time than the `history` mode in the trial executable. A separate UCI replay compared depth, score, reported nodes, and best move across 99 positions at depth five capped at 30,000 nodes. It included both development suites, nodes from the latest Pandafish losses, and seeded legal walks from six standard or special positions. All decisions matched.
+
+The native tests compare the early legal-move probe and ordered tactical list with the full list on targeted fixtures and seeded walks. They verify state restoration, promotions, pinned en passant, and terminal positions. Search fixtures compare the two profiles on mate, stalemate at the quiescence frontier, quiet check evasions, intended draw claims, and interrupted searches.
+
+### Equal-clock comparison
+
+The four matches use the previous iteration’s combined development set at `5+0.05` (11 pairs) and the evaluation set at `10+0.1` (six pairs). The trial plays frozen quiet history and frozen Pandafish v1.0 at both clocks. Use the same Mac and runner settings as the first iteration, with `args=uci staged` for the trial. The four comparisons share the host and each runs one game at a time. The selection gate requires fixed-work parity and a substantial wall-time reduction. Timed matches check whether the speedup improves useful search depth and game results at both clocks.
+
+| Opponent | Clock | Pairs | W/D/L | Score | Forfeits |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Frozen quiet history | `5+0.05` | 11 | 11/6/5 | 63.6% | 0 |
+| Frozen quiet history | `10+0.1` | 6 | 6/2/4 | 58.3% | 0 |
+| Frozen Pandafish v1.0 | `5+0.05` | 11 | 17/3/2 | 84.1% | 0 |
+| Frozen Pandafish v1.0 | `10+0.1` | 6 | 9/1/2 | 79.2% | 0 |
+
+The trial increased mean reported depth against the frozen history build from 5.88 to 6.35 at the short clock and from 6.57 to 7.10 at the longer clock. Against Pandafish the short score was 90.0% on the original five and 79.2% on the evaluation six. Against the history build’s recorded results on the same openings and clock, the Pandafish scores increased by 15.9 points short and 8.3 points longer. Resampling the matched opening pairs gives descriptive 95% intervals of 0.0 to +31.8 points for the short gain and −33.3 to +41.7 for the longer gain. The longer result remains sensitive to individual openings.
+
+Independent replay checked all 7,997 plies and rule endings from the 68 new games. Debug, release, and runtime-check test suites passed. The final default reproduced the frozen capped and uncapped bench signatures and passed the 99-position UCI replay, all 40 fastchess UCI checks, and the offline lichess-bot dry run. Full move generation matched Stockfish on 14 perft fixtures and python-chess on 432 sampled positions.
+
+### Selection and recommendation
+
+Staged quiescence is the default candidate. Use `uci history` to run the full-list control or `bench 6 | diff -u benchmarks/quiet-history-depth6.txt -` to check the new default’s fixed work.
+
+**Move to step 10.** Select this staged quiescence build for the first formal Pandafish result. It reduces fixed-work search time by 60% and led both frozen opponents at both development clocks. The next evidence worth collecting is a predeclared match on fresh openings, especially at the longer clock where six development pairs leave a wide interval. Freeze a build and settings on the confirmation host before drawing the reserved sample. The results here use the M2 Mac.
+
+The local artifact directory `.local/checkpoint-09-quiescence/` contains the binaries, profiler sample, timing captures, runner configurations, PGNs, and replay reports. The trial binary SHA-256 is `3ffaad43ef5277d2ada8c56add72ab15a55f1d2a0ee55b3d45d8d85abc2ce154`. The selected Mac executable `quiescence-default` has SHA-256 `d43220c05a75e8ff7a9968446efc4bd41a5a4355801d0fbcc5cad09b721d219b`. The source hashes in `playing-source.sha256` have manifest SHA-256 `55175512e3ed58ebb2ecafbd5637b47e7e8bf01f4ccd403ed06b5c8150783b38`. The toolchain and release flags are the same as in the first iteration. The final build log records the full commands.
+
+| PGN | SHA-256 |
+| --- | --- |
+| `short-history.pgn` | `08bc89b75bbd3ab9158495e8ad42dfc74bd438d3c6673c5a56c2fd0845897e45` |
+| `longer-history.pgn` | `71baf362607404254823d4d2eabe93966676f4c044204b71158ee2f61b8e5ee4` |
+| `short-pandafish.pgn` | `81324ae79e2fc587568683f5784e95a2245d463abfb45e8441c15be251fbee04` |
+| `longer-pandafish.pgn` | `6ab6ef9b83eea04661a2d218cf3584527e1d442a413edfcbcb699d160108b5a0` |

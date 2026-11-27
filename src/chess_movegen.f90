@@ -44,7 +44,7 @@ module chess_movegen
     iand(diagonals, above), iand(antidiagonals, above), iand(antidiagonals, below), iand(diagonals, below)], [64, 8])
   logical, parameter :: increasing(8) = [.true., .false., .true., .false., .true., .true., .false., .false.]
 
-  public :: generate_legal, in_check, piece_targets, pawn_pressure
+  public :: generate_legal, has_legal_move, in_check, piece_targets, pawn_pressure
 
 contains
 
@@ -125,30 +125,57 @@ contains
     end if
   end function pawn_pressure
 
-  subroutine generate_legal(pos, list)
+  subroutine generate_legal(pos, list, tactical_only)
     type(position), intent(inout) :: pos
     type(move_list), intent(out) :: list
-    type(undo_state) :: undo
+    logical, optional, intent(in) :: tactical_only
     integer :: i, mover, candidates
     integer(int32) :: move
-    logical :: legal
+    logical :: tactical
 
-    call generate_candidates(pos, list)
+    tactical = .false.
+    if (present(tactical_only)) tactical = tactical_only
+    call generate_candidates(pos, list, tactical)
     mover = pos%turn
     candidates = list%count
     list%count = 0
     do i = 1, candidates
       move = list%moves(i)
-      call make_move(pos, move, undo)
-      legal = .not. in_check(pos, mover)
-      call unmake_move(pos, move, undo)
-      if (legal) call append_move(list, move)
+      if (legal_candidate(pos, mover, move)) call append_move(list, move)
     end do
   end subroutine generate_legal
 
-  subroutine generate_candidates(pos, list)
+  logical function has_legal_move(pos) result(found)
+    type(position), intent(inout) :: pos
+    type(move_list) :: candidates
+    integer :: i, mover
+
+    call generate_candidates(pos, candidates, .false.)
+    mover = pos%turn
+    do i = 1, candidates%count
+      if (legal_candidate(pos, mover, candidates%moves(i))) then
+        found = .true.
+        return
+      end if
+    end do
+    found = .false.
+  end function has_legal_move
+
+  logical function legal_candidate(pos, mover, move) result(legal)
+    type(position), intent(inout) :: pos
+    integer, intent(in) :: mover
+    integer(int32), intent(in) :: move
+    type(undo_state) :: undo
+
+    call make_move(pos, move, undo)
+    legal = .not. in_check(pos, mover)
+    call unmake_move(pos, move, undo)
+  end function legal_candidate
+
+  subroutine generate_candidates(pos, list, tactical_only)
     type(position), intent(in) :: pos
     type(move_list), intent(out) :: list
+    logical, intent(in) :: tactical_only
     integer :: side, opponent, origin, kind
     integer(int64) :: pieces, occupied, available, captures, targets
 
@@ -157,14 +184,14 @@ contains
     opponent = other_side(side)
     occupied = ior(pos%occupied(side), pos%occupied(opponent))
     captures = iand(pos%occupied(opponent), not(pos%pieces(king, opponent)))
-    available = not(ior(pos%occupied(side), pos%pieces(king, opponent)))
+    available = merge(captures, not(ior(pos%occupied(side), pos%pieces(king, opponent))), tactical_only)
     if (pos%ep /= no_square) captures = ibset(captures, pos%ep)
     pieces = pos%occupied(side)
     do while (pieces /= 0)
       origin = next_square(pieces)
       kind = abs(pos%board(origin))
       if (kind == pawn) then
-        call generate_pawn(pos, origin, captures, occupied, list)
+        call generate_pawn(pos, origin, captures, occupied, list, tactical_only)
         cycle
       end if
       targets = iand(piece_targets(origin, kind, occupied), available)
@@ -172,21 +199,22 @@ contains
         call append_move(list, pack_move(origin, next_square(targets)))
       end do
     end do
-    call generate_castles(pos, occupied, list)
+    if (.not. tactical_only) call generate_castles(pos, occupied, list)
   end subroutine generate_candidates
 
-  subroutine generate_pawn(pos, origin, captures, occupied, list)
+  subroutine generate_pawn(pos, origin, captures, occupied, list, tactical_only)
     type(position), intent(in) :: pos
     integer, intent(in) :: origin
     integer(int64), intent(in) :: captures, occupied
     type(move_list), intent(inout) :: list
+    logical, intent(in) :: tactical_only
     integer :: target, step, home_rank
     integer(int64) :: targets
 
     step = pawn_step(pos%turn)
     home_rank = merge(1, 6, pos%turn == white)
     target = origin + step
-    if (.not. btest(occupied, target)) then
+    if ((.not. tactical_only .or. target / 8 == 0 .or. target / 8 == 7) .and. .not. btest(occupied, target)) then
       call append_pawn_move(list, origin, target)
       if (origin / 8 == home_rank) then
         if (.not. btest(occupied, target + step)) call append_move(list, pack_move(origin, target + step))
