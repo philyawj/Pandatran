@@ -72,3 +72,18 @@ For the last two runs, use `start=4` on the opening option, `-rounds 1`, and dis
 | `pilot-long.pgn` | `ee863d860b5821c9c52bf281c27b19f9ad8e71541df595509b057e544dd7e658` |
 
 During the longer run, a single memory sample put the four Pandafish processes at 13,760–14,288 KiB RSS each and fastchess at 4,720 KiB. Mac defaults for the next checkpoint that needs timed games are `10+0.1` and concurrency 1, with `60+0.6` for a slower smoke test. Concurrency 2 worked in both one-pair checks. The Mac was the agreed checkpoint host. Raspberry Pi runtime, sustained throughput, thermal behavior, and the final process-memory limit remain to be calibrated before confirmation.
+
+## Checkpoint 2 move generation
+
+The release build matched every root move and count from Stockfish 19 for six standard perft positions and eight cases covering castling, en passant, promotion, double check, stalemate and checkmate. The Mac Stockfish executable SHA-256 was `dc2f18c34ae962dff591b66147d220ec06e61d756b93d8a4f5e04fd8e55c251f`. Perft counts legal move paths without applying draw claims. [Published positions and counts](https://chessprogramming.org/Perft_Results)
+
+| Position | Depth | Nodes |
+| --- | --- | --- |
+| Standard start | 5 | 4,865,609 |
+| Kiwipete | 4 | 4,085,603 |
+| Position 3 | 5 | 674,624 |
+| Position 4 | 4 | 422,333 |
+| Position 5 | 4 | 2,103,487 |
+| Position 6 | 4 | 3,894,594 |
+
+An external python-chess 1.11.2 check compared 432 sampled positions, including 108 depth-two divides. The sample used three 24-position walks from each standard position, selected from coordinate-sorted legal moves with Python’s PRNG seeded at `20261126`. The repository’s Fortran tests independently check state restoration after moves, malformed FEN rejection, and standard and special-move fixtures. Local oracle output is in `.local/checkpoint-02/oracle.txt`.

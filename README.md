@@ -6,11 +6,12 @@ Pandatran is a from-scratch chess engine project in modern Fortran. The goal is 
 
 The engine will start with classical search and evaluation and speak UCI for match testing and eventual lichess-bot play. Project-owned engine code, tests, and tools will be written in Fortran.
 
-The current executable is a build smoke test. To run it and its tests with gfortran and fpm installed:
+The current executable can count legal move paths from the standard start or a six-field FEN. Use `divide` to see the count for each legal root move.
 
 ```sh
-fpm run
 fpm test
+fpm run --profile release -- perft 5
+fpm run --profile release -- divide 3 "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1"
 ```
 
 - [Initial research](INITIAL_RESEARCH.MD)
