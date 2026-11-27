@@ -7,6 +7,7 @@ module uci_session
   use chess_draws, only: position_history, reset_history, record_game_position
   use chess_search, only: search_control, search_result, iterative_search, max_search_depth, mate_score, mate_threshold
   use uci_input, only: line_reader, line_ready, input_closed
+  use uci_clock, only: search_budget, budget_for_move, stop_after_iteration
   implicit none
   private
   public :: run_uci
@@ -23,10 +24,14 @@ module uci_session
     type(line_reader) :: input
     character(len=:), allocatable :: pending
     integer(int64) :: start_tick, tick_rate
-    real(real64) :: seconds = -1.0_real64
+    type(search_budget) :: budget
+    real(real64) :: deadline, previous_elapsed
+    integer(int64) :: previous_nodes, previous_iteration_nodes
+    integer(int32) :: previous_move
     logical :: stopped = .false., exiting = .false.
   contains
     procedure :: cancelled
+    procedure :: stop_after_depth => clock_limit_reached
   end type uci_control
 
 contains
@@ -87,9 +92,15 @@ contains
       return
     end if
     call system_clock(count=control%start_tick, count_rate=control%tick_rate)
-    control%seconds = move_budget(settings, pos%turn)
+    control%budget = budget_for_move(settings%remaining(pos%turn), settings%increment(pos%turn), &
+      settings%moves_to_go, settings%movetime, settings%infinite)
+    control%deadline = control%budget%hard
     control%node_limit = settings%nodes
     control%stopped = .false.
+    control%previous_elapsed = 0.0_real64
+    control%previous_nodes = 0
+    control%previous_iteration_nodes = 0
+    control%previous_move = 0
     call generate_legal(pos, roots)
     if (settings%restrict_moves) call filter_roots(roots, settings%allowed)
 
@@ -142,14 +153,41 @@ contains
 
   logical function cancelled(control) result(stopped)
     class(uci_control), intent(inout) :: control
-    integer(int64) :: now
 
     call service_search_input(control, 0)
     stopped = control%stopped
-    if (stopped .or. control%seconds < 0.0_real64) return
-    call system_clock(count=now)
-    stopped = real(now - control%start_tick, real64) >= control%seconds * real(control%tick_rate, real64)
+    if (stopped .or. control%deadline < 0.0_real64) return
+    stopped = elapsed_time(control) >= control%deadline
   end function cancelled
+
+  logical function clock_limit_reached(control, result) result(stopped)
+    class(uci_control), intent(inout) :: control
+    type(search_result), intent(in) :: result
+    real(real64) :: elapsed
+    integer(int64) :: iteration_nodes
+    logical :: stable
+
+    stopped = control%search_control%stop_after_depth(result)
+    if (stopped .or. control%budget%soft < 0.0_real64) return
+    elapsed = elapsed_time(control)
+    iteration_nodes = control%nodes - control%previous_nodes
+    stable = result%depth >= 3 .and. result%move == control%previous_move
+    control%deadline = merge(control%budget%soft, control%budget%hard, stable)
+    stopped = stop_after_iteration(control%budget%soft, elapsed, elapsed - control%previous_elapsed, &
+      iteration_nodes, control%previous_iteration_nodes, stable)
+    control%previous_elapsed = elapsed
+    control%previous_nodes = control%nodes
+    control%previous_iteration_nodes = iteration_nodes
+    control%previous_move = result%move
+  end function clock_limit_reached
+
+  real(real64) function elapsed_time(control) result(seconds)
+    class(uci_control), intent(in) :: control
+    integer(int64) :: now
+
+    call system_clock(count=now)
+    seconds = real(now - control%start_tick, real64) / real(control%tick_rate, real64)
+  end function elapsed_time
 
   logical function set_position(line, cursor, pos, history) result(ok)
     character(len=*), intent(in) :: line
@@ -260,26 +298,6 @@ contains
     if (settings%restrict_moves .and. settings%allowed%count == 0) return
     ok = .true.
   end function parse_go
-
-  pure real(real64) function move_budget(settings, side) result(seconds)
-    type(search_settings), intent(in) :: settings
-    integer, intent(in) :: side
-    real(real64) :: available, remaining, reserve
-
-    seconds = -1.0_real64
-    if (settings%infinite) return
-    if (settings%movetime >= 0) seconds = 0.001_real64 * real(settings%movetime, real64)
-    if (settings%remaining(side) < 0) return
-    remaining = 0.001_real64 * real(settings%remaining(side), real64)
-    reserve = min(0.025_real64, max(0.001_real64, 0.10_real64 * remaining))
-    available = max(0.0_real64, remaining - reserve)
-    if (settings%movetime >= 0) then
-      seconds = min(available, seconds)
-    else
-      seconds = min(available, available / real(settings%moves_to_go, real64) + &
-        0.00065_real64 * real(settings%increment(side), real64))
-    end if
-  end function move_budget
 
   subroutine filter_roots(roots, allowed)
     type(move_list), intent(inout) :: roots

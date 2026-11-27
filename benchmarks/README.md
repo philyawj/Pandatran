@@ -328,3 +328,75 @@ Match logs, runner configurations, and independent replay summaries are under `.
 | `all-vs-safety.pgn` | `8bdce16260758d91b3ab44115295471b9e900607bba505dbd6202c945c5fd84c` |
 | `safety-vs-Pandafish-v1.0.pgn` | `f73557d8425d5f60e2a1025b84c33e5df0cadda9628368b95c2c241ab1030c1a` |
 | `all-vs-Pandafish-v1.0.pgn` | `a6d3849fc95032cd88b992853aa10151649d76ce7a047228e38afe10cd6d3483` |
+
+## Checkpoint 8 clock use and reliability
+
+### Search throughput
+
+A two-second macOS sample of the frozen checkpoint 7 engine searching Kiwipete ranked the pipe poll and sliding-attack detection first among leaf symbols. The two search comparisons below isolate sliding attacks and poll cadence. Profiling and timing were on the M2 Mac. Raspberry Pi timings and thermal behavior remain to be measured on the target host.
+
+Sliding attacks now start from a 4 KiB table of empty-board directional masks. An occupancy intersection and bit scan find the closest blocker. Its ray removes the squares behind it while keeping the blocker square. The same function serves legal move generation, check detection and mobility evaluation. [Classical sliding attacks](https://chessprogramming.org/Classical_Approach)
+
+| Workload | Frozen checkpoint 7 | Ray masks at 128-node polling | Change |
+| --- | ---: | ---: | ---: |
+| Seven-position capped search | 0.4964 s | 0.3237 s | 34.8% less time |
+| Starting position perft depth five | 0.2488 s | 0.1646 s | 33.8% less time |
+
+These are medians of five alternating serial runs. Search reproduced the [checkpoint 7 signature](evaluation-depth6-100k.txt) byte-for-byte, and perft reproduced 4,865,609 paths. At a fixed 400,000 UCI nodes on Kiwipete without a clock limit, 512-node polling reduced the median from 699–701 ms to 678 ms over separate seven-run blocks bracketed by the 128-node build. The untimed capped bench stayed at 0.324–0.325 s for both cadences. The engine keeps the 128-node cadence for clock and command responsiveness.
+
+### Clock policy
+
+For ordinary play, the existing allocation becomes the soft target. It divides the usable remaining clock by `movestogo` (24 by default), adds 65% of the increment, and caps the result at the usable remaining clock. The hard limit can extend that target by 50%, still capped by the usable time. At least 1 ms and at most 25 ms is reserved when the clock permits, using 10% in between. The reserve protects the time before the next increment is credited. [Time management reference](https://github.com/official-stockfish/Stockfish/blob/master/src/timeman.cpp)
+
+Starting at completed depth three, two consecutive iterations with the same best move keep the next iteration within the soft target. The engine skips that iteration if its projected finish would reach the target, estimating its duration from the last iteration’s time and a node-growth factor clamped to 3–4. A changed best move leaves the hard extension available. The first trial let a stable move use the extension and reached 799 ms on the 532 ms start-position target without gaining a ply. The final rule gives that move back at depth six in 195 ms.
+
+`go movetime` uses its explicit limit and any smaller remaining-clock cap. A search interrupted mid-iteration returns the last completed move or a legal fallback. An explicit zero time returns the fallback immediately. Depth and node searches without a clock use their requested limits. `go infinite` remains interruptible with `stop`.
+
+| UCI control case | Checkpoint 7 median | Checkpoint 8 median | Completed depth |
+| --- | ---: | ---: | ---: |
+| White to move, start position, 5 s + 500 ms, stable best move | 532.42 ms | 195.12 ms | 6 / 6 |
+| Black to move after `e4`, 5 s + 500 ms, best move changes | 532.47 ms | 798.56 ms | 6 / 6 |
+| Kiwipete with ten moves to go, 2.25 s + 5 ms | 226.01 ms | 103.08 ms | 4 / 4 |
+| White to move, 5 ms remaining with a large increment | 4.07 ms | 4.06 ms | 3 / 3 |
+| Black to move, 5 ms remaining with a large increment | 4.06 ms | 1.51 ms | 3 / 3 |
+| `movetime 80` with 37 ms left | 33.47 ms | 33.44 ms | 4 / 4 |
+
+Each row uses five fresh-game runs per build. Measurements start before sending `go` and end at the returned `bestmove`, so they include local pipe overhead. For fixed `movetime` of 40, 100, and 300 ms, the candidate’s maximum round trip across all 15 runs was within 0.24 ms of the requested time. The changed-move example consumed its extension without completing another ply. It illustrates the time cost of allowing another iteration when the preferred move changes.
+
+On a 100 ms White clock with a 5 s increment, the candidate returned the same best move five times and completed depth five in four runs and depth four in one. The frozen build completed depth five in all five runs. The clock projection can save time at the cost of a completed iteration near a boundary.
+
+In 20 additional Kiwipete searches, delayed commands exercised the pipe while the search was running. The candidate answered `isready` in 0.124 ms median and 0.257 ms maximum. It returned a legal move after `stop` in 0.040 ms median and 0.238 ms maximum. The frozen build’s maxima were 0.418 and 0.463 ms on the same host.
+
+A separate fastchess trace requested 40 ms per move in one pair capped at 12 full moves per game with a 5 ms runner margin. The 48 legal moves took 40.394 ms median and 40.529 ms maximum from the runner’s `go` to its receipt of `bestmove`. This includes its transport and engine deadline polling. The capped pair measures latency only.
+
+### Local bot dry run
+
+The existing lichess-bot checkout at `baa2b7e78320b99125a91c2b1805bb7a5c4fb6ea` launched the pinned candidate through its real UCI wrapper. A mock Lichess endpoint captured each submitted move. The wrapper returned legal moves for the first-move path with a 200 ms override and for ordinary White and Black clocks. A simulated 50 ms overhead reduced a 49 ms Black clock to the client’s 1 ms minimum and yielded a legal fallback in under 1 ms. [Pinned lichess-bot wrapper](https://github.com/lichess-bot-devs/lichess-bot/blob/baa2b7e78320b99125a91c2b1805bb7a5c4fb6ea/lib/engine_wrapper.py)
+
+- Point the client at the absolute path to the release executable and select UCI, standard chess, and pondering off.
+- Check `uci`, `isready`, and `ucinewgame`. Replay a known position and verify one legal `bestmove` after a timed `go` for each color.
+- Check `go infinite` followed by `isready`, `stop`, and `quit`. On the eventual bot host, measure the client’s move overhead and replay the low-clock case before live games.
+
+### Timed play
+
+Use the [checkpoint 4 runner command](#checkpoint-4-tactical-baseline) with the checkpoint 8 executable, the frozen checkpoint 7 or Pandafish executable as opponent, and the clock and round count below. Each comparison used reversed colors from the first listed positions in [development.epd](development.epd), one game at a time, fresh engine processes, zero margin, and strict checks. The comparisons overlapped on the M2 Mac.
+
+| Opponent | Clock | Opening pairs | Pandatran W/D/L | Score | Forfeits |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Frozen checkpoint 7 | `5+0.05` | 5 | 5/2/3 | 60% | 0 |
+| Frozen checkpoint 7 | `20+0.2` | 3 | 3/3/0 | 75% | 0 |
+| Frozen Pandafish v1.0 | `5+0.05` | 5 | 4/3/3 | 55% | 0 |
+
+The new engine scored 55% against Pandafish v1.0, up from checkpoint 7’s 35% on the same openings and clock. It was Pandatran’s first lead in this screen. Resampling the five opening pairs gives descriptive 95% intervals of 20–85% for the score and −5 to +40 percentage points for the change. The separate confirmation reserve remains unused.
+
+At the short clock against checkpoint 7, the median reported depth rose from five to six, and the median runner time per move fell from 103 to 86 ms. At the longer clock both medians were depth seven, with the runner time per move falling from 444 to 357 ms. The two engines visited different positions after leaving the opening, so these are game summaries. Independent replay checked all 3,268 plies, color swaps, and rule endings across the three matches.
+
+Debug, release, and Fortran runtime-check tests passed, including the new clock and asymmetric UCI pipe fixtures. The candidate passed all 40 fastchess compliance checks. Stockfish matched all 14 perft fixtures and python-chess matched 432 sampled positions.
+
+The frozen checkpoint 8 engine SHA-256 is `8a426727adaa56bc4a4872ef00e9b3c8b070f4b13b80f41725f5cc99a2903d34`. Binary trials, profiler output, timings, runner configurations, PGNs, and replay reports are under `.local/checkpoint-08/`.
+
+| PGN | SHA-256 |
+| --- | --- |
+| `short.pgn` | `4b973b264e0b3fd13ced7a4d35ff4daa122757b651d80fb7d7c7878b7a283cd4` |
+| `longer.pgn` | `8ce86f5964eef035790363efd9dbcadee40373277873fa58af5e742e562ccae8` |
+| `pandafish.pgn` | `48ed9c2d95cc26f9fbb843e39e2e1b8c174570883907468de663e99b9d5caddc` |

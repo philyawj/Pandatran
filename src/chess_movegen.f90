@@ -29,8 +29,20 @@ module chess_movegen
     ior(shiftl(two_adjacent, 8), shiftr(two_adjacent, 8)))
   integer(int64), parameter :: pawn_attacks(0:63, 2) = &
     reshape([shiftl(adjacent, 8), shiftr(adjacent, 8)], [64, 2])
-  integer, parameter :: file_delta(8) = [1, -1, 0, 0, 1, -1, 1, -1]
-  integer, parameter :: rank_delta(8) = [0, 0, 1, -1, 1, 1, -1, -1]
+  integer(int64), parameter :: rank_one = int(z'ff', int64)
+  integer(int64), parameter :: a1_h8 = int(z'8040201008040201', int64)
+  integer(int64), parameter :: h1_a8 = int(z'0102040810204080', int64)
+  integer(int64), parameter :: rank_lines(0:63) = [(shiftl(rank_one, 8 * (square / 8)), square=0,63)]
+  integer(int64), parameter :: file_lines(0:63) = [(shiftl(file_a, mod(square, 8)), square=0,63)]
+  integer(int64), parameter :: diagonals(0:63) = [(ishft(a1_h8, 8 * (square / 8 - mod(square, 8))), square=0,63)]
+  integer(int64), parameter :: antidiagonals(0:63) = [(ishft(h1_a8, 8 * (square / 8 + mod(square, 8) - 7)), square=0,63)]
+  integer(int64), parameter :: above(0:63) = [(shiftl(not(0_int64), square + 1), square=0,63)]
+  integer(int64), parameter :: below(0:63) = [(shiftr(not(0_int64), 64 - square), square=0,63)]
+  ! Directions are east, west, north, south, northeast, northwest, southeast, southwest.
+  integer(int64), parameter :: rays(0:63, 8) = reshape([ &
+    iand(rank_lines, above), iand(rank_lines, below), iand(file_lines, above), iand(file_lines, below), &
+    iand(diagonals, above), iand(antidiagonals, above), iand(antidiagonals, below), iand(diagonals, below)], [64, 8])
+  logical, parameter :: increasing(8) = [.true., .false., .true., .false., .true., .true., .false., .false.]
 
   public :: generate_legal, in_check, piece_targets, pawn_pressure
 
@@ -70,19 +82,14 @@ contains
   pure integer(int64) function ray(origin, direction, occupied) result(targets)
     integer, intent(in) :: origin, direction
     integer(int64), intent(in) :: occupied
-    integer :: file, rank, target
+    integer(int64) :: blockers
+    integer :: nearest
 
-    targets = 0_int64
-    file = mod(origin, 8)
-    rank = origin / 8
-    do
-      file = file + file_delta(direction)
-      rank = rank + rank_delta(direction)
-      if (file < 0 .or. file > 7 .or. rank < 0 .or. rank > 7) exit
-      target = rank * 8 + file
-      targets = ibset(targets, target)
-      if (btest(occupied, target)) exit
-    end do
+    targets = rays(origin, direction)
+    blockers = iand(targets, occupied)
+    if (blockers == 0) return
+    nearest = merge(trailz(blockers), 63 - leadz(blockers), increasing(direction))
+    targets = iand(targets, not(rays(nearest, direction)))
   end function ray
 
   pure integer(int64) function piece_targets(origin, kind, occupied) result(targets)

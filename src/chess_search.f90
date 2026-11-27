@@ -18,6 +18,11 @@ module chess_search
   integer, parameter, public :: default_mode = lmr_mode
   integer, parameter :: aspiration_width = 40
 
+  type, public :: search_result
+    integer(int32) :: move = 0
+    integer :: depth = 0, score = 0
+  end type search_result
+
   type, public :: search_control
     integer(int64) :: nodes = 0, node_limit = huge(0_int64)
     integer(int64) :: reductions = 0, reduced_researches = 0
@@ -26,12 +31,8 @@ module chess_search
     type(transposition_table) :: table
   contains
     procedure :: cancelled => uninterruptible
+    procedure :: stop_after_depth => search_limit_reached
   end type search_control
-
-  type, public :: search_result
-    integer(int32) :: move = 0
-    integer :: depth = 0, score = 0
-  end type search_result
 
   abstract interface
     subroutine report_progress(result, nodes)
@@ -49,6 +50,14 @@ contains
     class(search_control), intent(inout) :: control
     stopped = control%interrupted
   end function uninterruptible
+
+  logical function search_limit_reached(control, result) result(stopped)
+    class(search_control), intent(inout) :: control
+    type(search_result), intent(in) :: result
+
+    stopped = control%nodes >= control%node_limit .or. &
+      (abs(result%score) >= mate_threshold .and. mate_score - abs(result%score) <= result%depth)
+  end function search_limit_reached
 
   subroutine iterative_search(pos, history, roots, depth_limit, control, result, on_depth)
     type(position), intent(inout) :: pos
@@ -104,10 +113,7 @@ contains
       end if
       result = candidate
       if (present(on_depth)) call on_depth(result, control%nodes)
-      if (control%nodes >= control%node_limit) exit
-      if (abs(result%score) >= mate_threshold) then
-        if (mate_score - abs(result%score) <= depth) exit
-      end if
+      if (control%stop_after_depth(result)) exit
     end do
   end subroutine iterative_search
 
