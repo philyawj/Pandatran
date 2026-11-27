@@ -5,24 +5,35 @@ program main
   use chess_positions, only: position, parse_fen, start_fen
   use chess_movegen, only: move_list
   use chess_perft, only: perft, perft_divide
+  use chess_bench, only: run_bench
   implicit none
 
   character(len=:), allocatable :: command, depth_text, fen
   type(position) :: pos
   type(move_list) :: list
-  integer(int64) :: counts(max_moves), nodes
+  integer(int64) :: counts(max_moves), nodes, node_limit
   integer :: depth, status, i
 
-  select case (command_argument_count())
-  case (0)
+  if (command_argument_count() == 0) then
     call run_uci()
     stop
-  case (2, 3)
-    command = argument(1)
-    depth_text = argument(2)
-  case default
-    call usage()
-  end select
+  end if
+  command = argument(1)
+  if (command == 'bench') then
+    if (command_argument_count() > 3) call usage()
+    depth = 3
+    node_limit = huge(node_limit)
+    if (command_argument_count() >= 2) then
+      nodes = positive_argument(2)
+      if (nodes > 8) call usage()
+      depth = int(nodes)
+    end if
+    if (command_argument_count() == 3) node_limit = positive_argument(3)
+    call run_bench(depth, node_limit)
+    stop
+  end if
+  if (command_argument_count() < 2 .or. command_argument_count() > 3) call usage()
+  depth_text = argument(2)
   if (command /= 'perft' .and. command /= 'divide') call usage()
   if (len(depth_text) == 0 .or. verify(depth_text, '0123456789') /= 0) call usage()
   read (depth_text, *, iostat=status) depth
@@ -58,8 +69,21 @@ contains
     call get_command_argument(index, value=value)
   end function argument
 
+  integer(int64) function positive_argument(index) result(value)
+    integer, intent(in) :: index
+    character(len=:), allocatable :: text
+    integer :: parse_status
+
+    text = argument(index)
+    if (len(text) == 0 .or. verify(text, '0123456789') /= 0) call usage()
+    read (text, *, iostat=parse_status) value
+    if (parse_status /= 0) call usage()
+    if (value <= 0) call usage()
+  end function positive_argument
+
   subroutine usage()
     write (error_unit, '(a)') 'Usage: pandatran | pandatran perft <0-8> ["FEN"] | pandatran divide <1-8> ["FEN"]'
+    write (error_unit, '(a)') '       pandatran bench [depth 1-8 [node limit per position]]'
     stop 2
   end subroutine usage
 

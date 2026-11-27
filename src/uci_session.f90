@@ -4,7 +4,8 @@ module uci_session
   use chess_moves, only: max_moves, move_text, parse_move
   use chess_positions, only: position, undo_state, parse_fen, start_fen, make_move
   use chess_movegen, only: generate_legal, move_list
-  use chess_search, only: search_control, search_depth, max_search_depth, mate_score
+  use chess_draws, only: position_history, reset_history, record_game_position
+  use chess_search, only: search_control, search_result, iterative_search, max_search_depth, mate_score, mate_threshold
   use uci_input, only: line_reader, line_ready, input_closed
   implicit none
   private
@@ -33,10 +34,12 @@ contains
   subroutine run_uci()
     type(uci_control) :: control
     type(position) :: pos
+    type(position_history) :: history
     character(len=:), allocatable :: line, command
     integer :: status, cursor
 
     if (.not. parse_fen(start_fen, pos)) error stop 'Invalid built-in start position'
+    call reset_history(pos, history)
     do while (.not. control%exiting)
       if (allocated(control%pending)) then
         call move_alloc(control%pending, line)
@@ -52,25 +55,27 @@ contains
         call identify()
       case ('isready')
         call send_line('readyok')
+      case ('ucinewgame')
+        call reset_history(pos, history)
       case ('position')
-        if (.not. set_position(line, cursor, pos)) call send_line('info string invalid position')
+        if (.not. set_position(line, cursor, pos, history)) call send_line('info string invalid position')
       case ('go')
-        call play(line, cursor, pos, control)
+        call play(line, cursor, pos, history, control)
       case ('quit')
         exit
       end select
     end do
   end subroutine run_uci
 
-  subroutine play(line, cursor, pos, control)
+  subroutine play(line, cursor, pos, history, control)
     character(len=*), intent(in) :: line
     integer, intent(inout) :: cursor
     type(position), intent(inout) :: pos
+    type(position_history), intent(inout) :: history
     type(uci_control), intent(inout) :: control
     type(search_settings) :: settings
     type(move_list) :: roots
-    integer(int32) :: best_move, candidate
-    integer :: depth, score
+    type(search_result) :: result
     character(len=5) :: reply
 
     if (.not. parse_go(line, cursor, settings)) then
@@ -79,26 +84,14 @@ contains
     end if
     call system_clock(count=control%start_tick, count_rate=control%tick_rate)
     control%seconds = move_budget(settings, pos%turn)
-    control%nodes = 0
     control%node_limit = settings%nodes
     control%stopped = .false.
-    control%interrupted = .false.
     call generate_legal(pos, roots)
     if (settings%restrict_moves) call filter_roots(roots, settings%allowed)
 
+    call iterative_search(pos, history, roots, settings%depth, control, result, report_depth)
     reply = '0000'
-    if (roots%count /= 0) then
-      best_move = roots%moves(1)
-      do depth = 1, settings%depth
-        if (control%cancelled()) exit
-        call search_depth(pos, roots, depth, control, candidate, score)
-        if (control%interrupted) exit
-        best_move = candidate
-        call report_depth(depth, score, best_move, control%nodes)
-        if (abs(score) >= mate_score - max_search_depth) exit
-      end do
-      reply = move_text(best_move)
-    end if
+    if (result%move /= 0) reply = move_text(result%move)
 
     if (settings%infinite) then
       do while (.not. control%stopped)
@@ -154,11 +147,13 @@ contains
     stopped = real(now - control%start_tick, real64) >= control%seconds * real(control%tick_rate, real64)
   end function cancelled
 
-  logical function set_position(line, cursor, pos) result(ok)
+  logical function set_position(line, cursor, pos, history) result(ok)
     character(len=*), intent(in) :: line
     integer, intent(inout) :: cursor
     type(position), intent(inout) :: pos
+    type(position_history), intent(inout) :: history
     type(position) :: candidate
+    type(position_history) :: replay
     type(move_list) :: legal
     type(undo_state) :: undo
     character(len=:), allocatable :: mode, fen, word
@@ -181,6 +176,7 @@ contains
       return
     end select
     if (.not. parse_fen(fen, candidate)) return
+    call reset_history(candidate, replay)
     word = next_word(line, cursor)
     if (len(word) /= 0 .and. word /= 'moves') return
     do
@@ -190,8 +186,10 @@ contains
       call generate_legal(candidate, legal)
       if (.not. any(legal%moves(:legal%count) == move)) return
       call make_move(candidate, move, undo)
+      call record_game_position(candidate, replay)
     end do
     pos = candidate
+    history = replay
     ok = .true.
   end function set_position
 
@@ -316,18 +314,19 @@ contains
     call send_line('uciok')
   end subroutine identify
 
-  subroutine report_depth(depth, score, best_move, nodes)
-    integer, intent(in) :: depth, score
-    integer(int32), intent(in) :: best_move
+  subroutine report_depth(result, nodes)
+    type(search_result), intent(in) :: result
     integer(int64), intent(in) :: nodes
     character(len=100) :: line
+    integer :: score
 
-    if (abs(score) >= mate_score - max_search_depth) then
-      write (line, '(a,i0,a,i0,a,i0,2a)') 'info depth ', depth, ' nodes ', nodes, ' score mate ', &
-        sign((mate_score - abs(score) + 1) / 2, score), ' pv ', trim(move_text(best_move))
+    score = result%score
+    if (abs(score) >= mate_threshold) then
+      write (line, '(a,i0,a,i0,a,i0,2a)') 'info depth ', result%depth, ' nodes ', nodes, ' score mate ', &
+        sign((mate_score - abs(score) + 1) / 2, score), ' pv ', trim(move_text(result%move))
     else
-      write (line, '(a,i0,a,i0,a,i0,2a)') 'info depth ', depth, ' nodes ', nodes, ' score cp ', score, &
-        ' pv ', trim(move_text(best_move))
+      write (line, '(a,i0,a,i0,a,i0,2a)') 'info depth ', result%depth, ' nodes ', nodes, ' score cp ', score, &
+        ' pv ', trim(move_text(result%move))
     end if
     call send_line(trim(line))
   end subroutine report_depth
