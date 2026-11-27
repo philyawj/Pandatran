@@ -303,7 +303,7 @@ The full combination is the default. Its score against Pandafish increased from 
 The launch profile applies to the entire engine process. Use `legacy` for the checkpoint 6 evaluator, `tapered` for phase-interpolated material and placement, or `pawns`, `mobility`, and `safety` to add one group. The combinations are `pawns+mobility`, `pawns+safety`, `mobility+safety`, and `all`. A normal UCI launch with no arguments uses `all`.
 
 ```sh
-"$pandatran" bench 6 100000 | diff -u benchmarks/evaluation-depth6-100k.txt -
+"$pandatran" bench 6 100000 lmr | diff -u benchmarks/evaluation-depth6-100k.txt -
 "$pandatran" evalbench all
 fastchess -engine cmd="$pandatran" 'args=uci lmr safety' name=safety \
   -engine cmd="$pandatran" 'args=uci lmr tapered' name=tapered \
@@ -400,3 +400,68 @@ The frozen checkpoint 8 engine SHA-256 is `8a426727adaa56bc4a4872ef00e9b3c8b070f
 | `short.pgn` | `4b973b264e0b3fd13ced7a4d35ff4daa122757b651d80fb7d7c7878b7a283cd4` |
 | `longer.pgn` | `8ce86f5964eef035790363efd9dbcadee40373277873fa58af5e742e562ccae8` |
 | `pandafish.pgn` | `48ed9c2d95cc26f9fbb843e39e2e1b8c174570883907468de663e99b9d5caddc` |
+
+## Checkpoint 9 quiet move ordering
+
+### Choice of experiment
+
+Replaying checkpoint 8’s ten Pandafish games showed that Pandatran reached a mean reported depth of 5.74 to Pandafish’s 6.41. Both Najdorf games were losses. In the Grünfeld loss Pandatran spent 278 ms on a depth-four decision at move 15 and its own evaluation worsened on the following moves. This motivated trying to obtain more completed search on the same clock. Checkpoint 8’s fixed-work speedup and its positive short and longer tests against checkpoint 7 made it the control.
+
+The trial learns which quiet moves cause beta cutoffs. It tracks a signed score for each side, origin, and destination in a 16 KiB table cleared at the start of each search. Starting at depth two in the main tree, it rewards a quiet cutoff with depth squared up to 256 and penalizes previously searched quiet moves by half that amount. Each update tapers against the table’s ±1,024 bounds. The principal-variation move or hash hint and captures or promotions keep priority. History ranks the remaining quiet moves, with generation order breaking ties. Quiescence ordering and the guards on late-move reductions retain their checkpoint 8 behavior. [History heuristic](https://chessprogramming.org/History_Heuristic)
+
+The trial used `uci history` and frozen checkpoint 8 used its default launch. The fixed-depth gate compares seven cases at depth six. The short screens use `5+0.05` over both existing development opening sets. The longer comparison against checkpoint 8 uses `10+0.1` on the six evaluation openings. The candidate must reduce fixed-depth work, score above 50% against checkpoint 8 in the combined short match, and at least match the frozen build’s aggregate score against Pandafish on those same openings. The longer match checks for a reversal. The selection uses development screens, and the confirmation reserve stays unused.
+
+The combined set concatenates [development.epd](development.epd) with [evaluation.epd](evaluation.epd), preserving order, for 11 pairs. Its SHA-256 is `199ca01487187df27908ff251ab583d5e1e948b3d9e53bd3a282054d1cb7bbc5`. The match setup uses the checkpoint 8 Mac, reversed colors, sequential openings, fresh processes per game, one game at a time per comparison, zero margin, and strict checks. The comparisons overlapped on the eight-core host.
+
+### Fixed search work
+
+The control and history modes returned the same move, score, and completed depth on all seven cases. History used 899,001 nodes to the control’s 989,572, a 9.2% reduction. Across five alternating serial runs per mode, median time fell from 1.4900 to 1.3892 seconds, a 6.8% reduction. The start position fell from 173,445 to 57,386 nodes. Kiwipete rose from 739,383 to 742,391 nodes and the recapture case rose from 51,876 to 75,991. Under a 100,000-node cap both modes returned the same score and move in three additional positions taken from the checkpoint 8 losses. History finished the last reported iteration with fewer nodes in each, including 23,667 versus 41,061 in the Grünfeld position. These samples measure search effort and use positions already seen during development.
+
+```sh
+"$pandatran" bench 6 lmr
+"$pandatran" bench 6 | diff -u benchmarks/quiet-history-depth6.txt -
+```
+
+### Timed results
+
+| Candidate / opponent | Clock | Opening set | Pairs | W/D/L | Score | Forfeits |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| Quiet history / checkpoint 8 | `5+0.05` | Combined | 11 | 9/5/8 | 52.3% | 0 |
+| Quiet history / checkpoint 8 | `10+0.1` | Evaluation six | 6 | 2/6/4 | 41.7% | 0 |
+| Checkpoint 8 / Pandafish | `5+0.05` | Original five | 5 | 4/3/3 | 55.0% | 0 |
+| Quiet history / Pandafish | `5+0.05` | Original five | 5 | 8/1/1 | 85.0% | 0 |
+| Checkpoint 8 / Pandafish | `5+0.05` | Evaluation six | 6 | 5/3/4 | 54.2% | 0 |
+| Quiet history / Pandafish | `5+0.05` | Evaluation six | 6 | 6/1/5 | 54.2% | 0 |
+| Checkpoint 8 / Pandafish | `5+0.05` | Combined | 11 | 9/6/7 | 54.5% | 0 |
+| Quiet history / Pandafish | `5+0.05` | Combined | 11 | 14/2/6 | 68.2% | 0 |
+| Checkpoint 8 / Pandafish | `10+0.1` | Evaluation six | 6 | 6/2/4 | 58.3% | 0 |
+| Quiet history / Pandafish | `10+0.1` | Evaluation six | 6 | 8/1/3 | 70.8% | 0 |
+
+The checkpoint 8 control reuses its recorded short match on the original five openings. The same control played a new match on the evaluation six. All of the trial’s 13.6-point aggregate gain came from the original five. Resampling the 11 matched pairs gives a descriptive 95% interval of −6.8 to +34.1 percentage points for that gain. Against checkpoint 8 the trial completed greater mean reported depths at both clocks. Its longer-clock game score fell below 50%, which prompted a direct longer-clock comparison of both builds against Pandafish on the evaluation six. To promote the trial, the longer-clock score against Pandafish must at least match the control’s.
+
+Quiet history passed that comparison and is the default for the next step 9 iteration. It gained 12.5 percentage points against Pandafish at the longer clock. Resampling the six pairs gives a descriptive 95% interval of −16.7 to +37.5 points for that gain. The decision rests on reduced fixed-depth work and stronger direct development scores against the target at both clocks. The longer loss to checkpoint 8 and the tie in aggregate score on the short evaluation-six screen show where the effect varied. Use `uci lmr` or `bench 6 lmr` for the prior ordering.
+
+Independent replay checked all 12,228 plies, starting positions, reversed colors, and rule endings from the 92 new games. The debug, release, and runtime-check suites passed. The final executable passed all 40 fastchess UCI checks and reproduced the trial’s depth, score, nodes, and principal variation on 12 UCI positions. It also matched Stockfish on 14 perft fixtures and python-chess on 432 sampled positions.
+
+### Build and match reproduction
+
+The Mac ran macOS 26.6.2 (25G83) on ARM64 with Homebrew GNU Fortran 14.1.0, fpm 0.13.0, and SDK 27.0 (26A425). The fpm release build used `-O3 -Wimplicit-interface -fPIC -fmax-errors=1 -funroll-loops -fcoarray=single -fimplicit-none -Werror=implicit-interface`, with `-cpp -ffree-form -DPANDATRAN_MACOS` for source compilation and `-Wl,-headerpad,0x200` at link.
+
+```sh
+export SDKROOT="$(xcrun --show-sdk-path)"
+fpm build --profile release --verbose
+cat benchmarks/development.epd benchmarks/evaluation.epd > "$results/combined-development.epd"
+```
+
+Use the checkpoint 8 runner settings with the opening set and rounds listed above. Pass `args=uci history` to the trial. The Mac Pandafish opponent is the frozen v1.0 release in checkpoint 1. The fastchess binary SHA-256 is `3088af5fd26bcf2c1e470351a4e5a39f38464662c50ab5d17af73a22d3caa9c9`.
+
+The local artifact directory `.local/checkpoint-09/` holds the release binaries, build and runner logs, configs, PGNs, and independent replay reports. The trial binary `quiet-trial` has SHA-256 `ec1b64256649ff41bafe0c964056e77cf08e8f613957812038f0c0149d105b04`. The selected Mac executable `checkpoint-09` has SHA-256 `de60e27c1a3cff0247249b2e6b16569a36075ab36aae5b40780dca3c30021d0e`. The compiled source and manifest hashes are listed in `playing-source.sha256`, which has SHA-256 `64889ab8073bf6386e9a9a8352d33c55bcdeef18f89a7e58ddbd434a845153d6`. This freezes the result of the iteration. Select and freeze the release candidate on the confirmation host when step 9 ends.
+
+| PGN | SHA-256 |
+| --- | --- |
+| `history-combined-cp8.pgn` | `6d4943b82a7069bce71a6df6842f43fc72857e1b9ea3c792e7900dfc48ae2bf7` |
+| `history-longer-cp8.pgn` | `5933604b04798a24900a30ba743e7b3abc639413032c99e95469dbe9e545539a` |
+| `pandafish-evaluation-cp8.pgn` | `7cee349f955a20c293274c68a5b524e9a2b13b8db3e1a8733eb416a6af4ada14` |
+| `history-combined-pandafish.pgn` | `11f7d8ae264c10d4aa2557b4704d438d06c9daeb3606247be926ebd6aa91bedd` |
+| `cp8-longer-pandafish.pgn` | `c210140c64580e07107498e9cf53879a10e71b11734d42dcd52e2cb6e23a4483` |
+| `history-longer-pandafish.pgn` | `f04c6713712f6f74c1d8472a26b3a4519ed55822c896da8f5bddea9f21905075` |

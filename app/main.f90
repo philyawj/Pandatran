@@ -125,7 +125,7 @@ contains
     write (error_unit, '(a)') 'Usage: pandatran | pandatran perft <0-8> ["FEN"] | pandatran divide <1-8> ["FEN"]'
     write (error_unit, '(a)') '       pandatran bench [depth 1-8 [nodes per position] [mode [evaluation]]]'
     write (error_unit, '(a)') '       pandatran uci <mode> [evaluation] | pandatran evalbench [evaluation]'
-    write (error_unit, '(a)') '       modes: default, plain, order, table, pvs, aspiration, lmr'
+    write (error_unit, '(a)') '       modes: default, plain, order, table, pvs, aspiration, lmr, history'
     write (error_unit, '(a)') '       evaluations: default, legacy, tapered, pawns, mobility, safety, all, or a + pair'
     stop 2
   end subroutine usage

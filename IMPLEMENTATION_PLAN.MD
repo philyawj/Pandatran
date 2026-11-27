@@ -104,14 +104,20 @@ Measure soft and hard deadline behavior, node-polling overhead, and time spent w
 
 **Pass when** short and longer match profiles run reliably, there are no unresolved legality or protocol faults, and any retained optimization demonstrates a reproducible benefit. Keep a small UCI compatibility checklist for eventual bot deployment.
 
-## 9. Close the measured gap
+## 9. Improve and select the confirmation candidate
 
-Read the latest Pandafish games and comparable A/B results. Choose one substantial change with evidence behind it. Options include improved quiet ordering, a classical evaluation revision, or a compact NNUE feasibility test. A classical candidate with a clear lead can use this checkpoint for robustness and cross-opponent checks. Freeze the final executable, compiler, flags, and any data artifacts before using the confirmation openings.
+Repeat this step on development openings. Each iteration starts with the latest Pandafish games and comparable A/B results, then tests one substantial change. Options include improved quiet ordering, a classical evaluation revision, or a compact NNUE feasibility test. Compare the trial with the strongest accepted Pandatran build and check it against frozen Pandafish. Review each iteration and carry forward the strongest supported build.
 
-**Pass when** the candidate has reproducible direct development results and a documented rationale for confirmation. If the gap is still substantial, report it and agree on further work or proceed to quantify the gap with the current candidate.
+**Leave step 9 when** the owner is ready to measure a release. Typical reasons include diminishing gains from recent iterations, an agreed effort budget, or a build worth confirming now. The selected candidate must have reproducible development results and a documented rationale. Keep the confirmation openings reserved throughout this loop.
 
 ## 10. Confirm the result
 
-Run a predeclared, fixed-size match between frozen Pandatran and Pandafish v1.0 on the same Pi. Set the sample size from a separate pilot and the smallest lead worth resolving. Pin clocks, resource limits, opening hash, runner configuration, and forfeiture, capping, and pair-recovery rules. Play a separate longer-clock check with its own recorded result.
+Freeze the selected executable, compiler, flags, and any data artifacts. Run a predeclared, fixed-size match between frozen Pandatran and Pandafish v1.0 on the same Pi. Set the sample size from a separate pilot and the smallest lead worth resolving. Pin clocks, resource limits, opening hash, runner configuration, and forfeiture, capping, and pair-recovery rules. Play a separate longer-clock check with its own recorded result.
 
 **Pass when** the match is reproducible and the report gives the total score, W/D/L, paired outcome counts, flags, and paired 95% confidence interval. Claim superiority at a clock only when the interval’s lower score bound exceeds 50%. Report an inconclusive result or a deficit with the same evidence. Package the UCI usage notes with the result. [Paired engine-test statistics](https://official-stockfish.github.io/docs/fishtest-wiki/Fishtest-Mathematics.html)
+
+## After checkpoint 10
+
+Checkpoint 10 closes the first development cycle and gives future work a measured baseline. Archive the confirmed engine, frozen Pandafish opponent, match settings, openings, and results together so the original result stays reproducible.
+
+Resume step 9 when there is a worthwhile new target or idea. Before restarting, agree on the smallest gain worth pursuing and the development and match time available. Run step 10 again for a later release decision, with a fresh sample from the remaining reserved openings drawn after the candidate and match budget are frozen.
