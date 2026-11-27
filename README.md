@@ -35,3 +35,4 @@ The deterministic bench reports each position’s move, score, completed depth, 
 - [Initial research](INITIAL_RESEARCH.MD)
 - [Implementation plan](IMPLEMENTATION_PLAN.MD)
 - [Benchmark setup](benchmarks/README.md)
+- [Experiment log](EXPERIMENTS.MD)
