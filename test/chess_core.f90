@@ -282,6 +282,7 @@ contains
     occupancy = iany(pieces, dim=1)
     call require(all(current%pieces == pieces), label // ' piece bitboards')
     call require(all(current%occupied == occupancy), label // ' occupancy')
+    call require(recompute_key(current) == current%key, label // ' recomputed Zobrist key')
   end subroutine check_bitboards
 
   subroutine same_state(current, expected, label)
@@ -296,6 +297,7 @@ contains
     call require(current%ep == expected%ep, label // ' en passant')
     call require(current%halfmove == expected%halfmove, label // ' halfmove clock')
     call require(current%fullmove == expected%fullmove, label // ' fullmove number')
+    call require(current%key == expected%key, label // ' Zobrist key')
   end subroutine same_state
 
 end program chess_core

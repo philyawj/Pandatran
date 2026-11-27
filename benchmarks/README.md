@@ -125,8 +125,8 @@ The depth search uses quiescence for captures, en passant, and all promotions. I
 The seven-case [depth-three baseline](tactical-depth3.txt) records centipawn scores below the mate range. In the mate range, the magnitude is 30,000 minus plies to mate. The fixed-node run at 4,096 nodes per position also reproduced byte-for-byte. Kiwipete exhausted that limit before finishing depth one. Its depth-zero entry records a legal fallback and a placeholder score. Both variants use the same iterative driver as UCI.
 
 ```sh
-"$pandatran" bench | diff -u benchmarks/tactical-depth3.txt -
-"$pandatran" bench 3 4096
+"$pandatran_cp4" bench | diff -u benchmarks/tactical-depth3.txt -
+"$pandatran_cp4" bench 3 4096
 ```
 
 Debug, release, and runtime-check builds passed, including the Fortran pipe and tactical fixtures. Cases include quiet and capture quiescence, mate distances, 99/100 and 149/150 halfmoves, legal and pinned en passant for repetition, castling-right changes, and cancellation with state restoration. The build passed all 40 fastchess compliance checks.
@@ -158,3 +158,47 @@ fastchess -engine cmd="$pandatran" name=Pandatran-cp4 \
   -config outname="$results/$match.json" \
   -pgnout file="$results/$match.pgn" append=false
 ```
+
+## Checkpoint 5 transpositions and move ordering
+
+The board key uses incremental 64-bit Zobrist hashing for pieces, the side to move, castling rights, and the en passant target. Tests recompute it after special moves and seeded legal walks and verify exact undo. The transposition table allocates 65,536 entries, or **2 MiB** on the Mac. It survives successive searches and clears on `ucinewgame`. The engine still fits the 3 MiB match cache budget. [Transposition table reference](https://chessprogramming.org/Transposition_Table)
+
+A matching board key can suggest a move, and ordering uses the suggestion when it is present in the generated legal list. Score reuse also requires the exact search depth, halfmove clock, and ordered reversible-history fingerprint. The fingerprint resets when a pawn move, capture, or castling-right change makes earlier states unreachable. Main-search entries store exact, lower, or upper bounds and normalize mate scores to the stored position. Quiescence uses its own bounded search. Tests cover index collisions, bound cutoffs, mate distances, cache clearing, and a draw score that must stay isolated from a search of the same FEN without its recorded history. [Graph history interaction](https://chessprogramming.org/Graph_History_Interaction)
+
+The ordering stages are the prior iteration’s best root move or the table hint, then captures and promotions, then quiet moves in their original order. PVS searches later choices with a narrow window and repeats a promising result at the full width when needed. The aspiration trial uses the prior iteration’s score ±40 cp and retries at full width on failure. PVS is the default. Aspiration saved 1.5% of nodes over PVS at depth four, with both measuring a 0.17-second median, so it remains a bench option. [Principal variation search](https://chessprogramming.org/Principal_Variation_Search)
+
+| Bench mode | Depth 3 nodes | Depth 3 median | Depth 4 nodes | Depth 4 median |
+| --- | ---: | ---: | ---: | ---: |
+| Depth-3 `plain` / frozen checkpoint 4 at depth 4 | 2,009,283 | 5.16 s | 6,859,275 | |
+| `order` | 40,830 | 0.10 s | 118,675 | 0.27 s |
+| `table` | 38,091 | 0.09 s | 96,320 | 0.22 s |
+| `pvs` | 29,684 | 0.07 s | 73,059 | 0.17 s |
+| `aspiration` | 29,008 | 0.07 s | 71,938 | 0.17 s |
+
+All seven scores and completed depths agreed across modes at both test depths. The depth-three `plain` output also matched the checkpoint 4 signature byte-for-byte. Ordering can change which tied move appears. Timing medians use three serial runs per measured mode on the Mac, alternating mode order. Kiwipete drove most of the savings and fell from 2,005,109 nodes to 27,173 at depth three. Kiwipete’s depth-one work fell from 15,776 to 4,691 nodes.
+
+```sh
+"$pandatran" bench | diff -u benchmarks/transposition-depth3.txt -
+"$pandatran" bench 3 plain | diff -u benchmarks/tactical-depth3.txt -
+"$pandatran" bench 4 aspiration
+```
+
+### Timed comparison
+
+The PVS build (SHA-256 `69b888188b52e33e67036a8d9c5f0378b7e1e8cd49247c33b2af39aeeb8622d2`) used the checkpoint 4 match settings. Each comparison played the same five color-swapped opening pairs on the Mac at `5+0.05`, with one concurrent game and the same runner options. Use `name=Pandatran-cp5` in the checkpoint 4 command and set the opponent to the frozen checkpoint 4 binary or Pandafish v1.0.
+
+| Opponent | Pairs | Pandatran W/D/L | Score | Forfeits |
+| --- | ---: | --- | ---: | ---: |
+| Frozen checkpoint 4 Pandatran | 5 | 8/1/1 | 85% | 0 |
+| Frozen Pandafish v1.0 | 5 | 0/1/9 | 5% | 0 |
+
+Against Pandafish, the observed gain over checkpoint 4 on these openings was **5 percentage points**, from a single draw. Resampling the five matched opening pairs gives a descriptive 95% percentile interval of 0 to 15 percentage points. With fixed openings and one scoring pair, this remains a development signal.
+
+Independent PGN replay verified every pair and outcome across 1,903 plies. Eighteen games ended by checkmate and two by the fifty-move rule. Debug, release and runtime-check tests passed, as did all 40 fastchess compliance checks. Move generation still matched Stockfish 19 on the 14 reference positions and python-chess on 432 sampled positions.
+
+Runner logs, PGNs and three-run mode comparisons live in `.local/checkpoint-05/`.
+
+| PGN | SHA-256 |
+| --- | --- |
+| `checkpoint-04.pgn` | `6bf90ce9160df474aac161e114db52e15003b86013fd32e6ca402016f86707fd` |
+| `pandafish.pgn` | `0d3589db6270ffb037a06011dd5a7ea625a08bfe68cf06331465566f68ebd465` |

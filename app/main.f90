@@ -5,34 +5,46 @@ program main
   use chess_positions, only: position, parse_fen, start_fen
   use chess_movegen, only: move_list
   use chess_perft, only: perft, perft_divide
-  use chess_bench, only: run_bench
+  use chess_bench, only: run_bench, bench_mode
   implicit none
 
   character(len=:), allocatable :: command, depth_text, fen
   type(position) :: pos
   type(move_list) :: list
   integer(int64) :: counts(max_moves), nodes, node_limit
-  integer :: depth, status, i
+  integer :: depth, status, i, argc, mode
 
-  if (command_argument_count() == 0) then
+  argc = command_argument_count()
+  if (argc == 0) then
     call run_uci()
     stop
   end if
   command = argument(1)
   if (command == 'bench') then
-    if (command_argument_count() > 3) call usage()
+    if (argc > 4) call usage()
     depth = 3
     node_limit = huge(node_limit)
-    if (command_argument_count() >= 2) then
+    mode = bench_mode('default')
+    if (argc >= 2) then
       nodes = positive_argument(2)
       if (nodes > 8) call usage()
       depth = int(nodes)
     end if
-    if (command_argument_count() == 3) node_limit = positive_argument(3)
-    call run_bench(depth, node_limit)
+    if (argc == 3) then
+      mode = bench_mode(argument(3))
+      if (mode < 0) then
+        node_limit = positive_argument(3)
+        mode = bench_mode('default')
+      end if
+    else if (argc == 4) then
+      node_limit = positive_argument(3)
+      mode = bench_mode(argument(4))
+      if (mode < 0) call usage()
+    end if
+    call run_bench(depth, node_limit, mode)
     stop
   end if
-  if (command_argument_count() < 2 .or. command_argument_count() > 3) call usage()
+  if (argc < 2 .or. argc > 3) call usage()
   depth_text = argument(2)
   if (command /= 'perft' .and. command /= 'divide') call usage()
   if (len(depth_text) == 0 .or. verify(depth_text, '0123456789') /= 0) call usage()
@@ -41,7 +53,7 @@ program main
   if (depth > 8 .or. (command == 'divide' .and. depth == 0)) call usage()
 
   fen = start_fen
-  if (command_argument_count() == 3) fen = argument(3)
+  if (argc == 3) fen = argument(3)
   if (.not. parse_fen(fen, pos)) then
     write (error_unit, '(a)') 'Invalid six-field FEN'
     stop 2
@@ -83,7 +95,8 @@ contains
 
   subroutine usage()
     write (error_unit, '(a)') 'Usage: pandatran | pandatran perft <0-8> ["FEN"] | pandatran divide <1-8> ["FEN"]'
-    write (error_unit, '(a)') '       pandatran bench [depth 1-8 [node limit per position]]'
+    write (error_unit, '(a)') '       pandatran bench [depth 1-8 [nodes per position] [mode]]'
+    write (error_unit, '(a)') '       modes: default, plain, order, table, pvs, aspiration'
     stop 2
   end subroutine usage
 

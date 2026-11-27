@@ -1,6 +1,7 @@
 module chess_positions
   use, intrinsic :: iso_fortran_env, only: int32, int64
   use chess_moves
+  use chess_hashes, only: initialize_keys, piece_keys, state_key
   implicit none
   private
 
@@ -15,7 +16,7 @@ module chess_positions
     integer :: board(0:63) = 0
     integer(int64) :: pieces(6, 2) = 0_int64, occupied(2) = 0_int64
     integer :: turn = white, castling = 0, ep = no_square
-    integer(int64) :: halfmove = 0_int64, fullmove = 1_int64
+    integer(int64) :: halfmove = 0_int64, fullmove = 1_int64, key = 0_int64
   end type position
 
   type, public :: undo_state
@@ -24,7 +25,7 @@ module chess_positions
     integer(int64) :: halfmove, fullmove
   end type undo_state
 
-  public :: parse_fen, to_fen, make_move, unmake_move
+  public :: parse_fen, to_fen, make_move, unmake_move, recompute_key
 
 contains
 
@@ -36,6 +37,7 @@ contains
     logical :: valid
 
     ok = .false.
+    call initialize_keys()
     candidate = position()
     last = 0
     do field = 1, 6
@@ -56,6 +58,7 @@ contains
     do first = last, len(fen)
       if (.not. whitespace(fen(first:first))) return
     end do
+    candidate%key = ieor(candidate%key, state_key(candidate%turn, candidate%castling, candidate%ep))
     pos = candidate
     ok = .true.
   end function parse_fen
@@ -251,6 +254,7 @@ contains
     if (abs(piece) == pawn .and. target == pos%ep) captured_square = target - step
     undo = undo_state(pos%board(captured_square), captured_square, pos%castling, pos%ep, pos%halfmove, pos%fullmove)
 
+    pos%key = ieor(pos%key, state_key(pos%turn, pos%castling, pos%ep))
     if (undo%captured /= 0) call remove_piece(pos, captured_square)
     call remove_piece(pos, origin)
     if (promotion == 0) then
@@ -271,6 +275,7 @@ contains
     end if
     if (pos%turn == black .and. pos%fullmove < huge(pos%fullmove)) pos%fullmove = pos%fullmove + 1
     pos%turn = other_side(pos%turn)
+    pos%key = ieor(pos%key, state_key(pos%turn, pos%castling, pos%ep))
   end subroutine make_move
 
   subroutine unmake_move(pos, move, undo)
@@ -281,6 +286,7 @@ contains
 
     origin = move_from(move)
     target = move_to(move)
+    pos%key = ieor(pos%key, state_key(pos%turn, pos%castling, pos%ep))
     pos%turn = other_side(pos%turn)
     piece = pos%board(target)
     if (move_promotion(move) /= 0) piece = colored_piece(pawn, pos%turn)
@@ -292,6 +298,7 @@ contains
     pos%ep = undo%ep
     pos%halfmove = undo%halfmove
     pos%fullmove = undo%fullmove
+    pos%key = ieor(pos%key, state_key(pos%turn, pos%castling, pos%ep))
   end subroutine unmake_move
 
   subroutine move_castle_rook(pos, origin, target, reverse)
@@ -343,6 +350,7 @@ contains
     side = piece_side(piece)
     kind = abs(piece)
     pos%board(square) = piece
+    pos%key = ieor(pos%key, piece_keys(square, piece))
     pos%pieces(kind, side) = ibset(pos%pieces(kind, side), square)
     pos%occupied(side) = ibset(pos%occupied(side), square)
   end subroutine put_piece
@@ -354,9 +362,20 @@ contains
 
     side = piece_side(pos%board(square))
     kind = abs(pos%board(square))
+    pos%key = ieor(pos%key, piece_keys(square, pos%board(square)))
     pos%board(square) = 0
     pos%pieces(kind, side) = ibclr(pos%pieces(kind, side), square)
     pos%occupied(side) = ibclr(pos%occupied(side), square)
   end subroutine remove_piece
+
+  pure integer(int64) function recompute_key(pos) result(key)
+    type(position), intent(in) :: pos
+    integer :: square
+
+    key = state_key(pos%turn, pos%castling, pos%ep)
+    do square = 0, 63
+      key = ieor(key, piece_keys(square, pos%board(square)))
+    end do
+  end function recompute_key
 
 end module chess_positions
