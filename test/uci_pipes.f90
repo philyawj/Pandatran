@@ -112,6 +112,12 @@ program uci_pipes
   call expect(first_engine, 'bestmove f7g7')
   call send('position fen rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1 moves c7c5 g1f3' // lf)
 
+  call send('go wtime 60000 btime 1 winc 9000 binc 9000 searchmoves b8c6' // lf)
+  call expect(first_engine, 'bestmove b8c6')
+  call send('go wtime 1 btime 60000 winc 9000 binc 9000 nodes 1 searchmoves b8c6' // lf)
+  call expect(first_engine, 'info depth 1 nodes 1 ', prefix=.true.)
+  call expect(first_engine, 'bestmove b8c6')
+
   call send('go infinite depth 1 searchmoves d7d5' // lf)
   call expect(first_engine, 'info depth 1', prefix=.true.)
   call send('isready' // lf)
