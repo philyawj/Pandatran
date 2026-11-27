@@ -31,8 +31,8 @@ module uci_session
 
 contains
 
-  subroutine run_uci(mode)
-    integer, intent(in), optional :: mode
+  subroutine run_uci(mode, profile)
+    integer, intent(in), optional :: mode, profile
     type(uci_control) :: control
     type(position) :: pos
     type(position_history) :: history
@@ -40,6 +40,7 @@ contains
     integer :: status, cursor
 
     if (present(mode)) control%mode = mode
+    if (present(profile)) control%evaluation = profile
     if (.not. parse_fen(start_fen, pos)) error stop 'Invalid built-in start position'
     call reset_history(pos, history)
     do while (.not. control%exiting)

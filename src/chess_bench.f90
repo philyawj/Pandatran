@@ -1,14 +1,15 @@
 module chess_bench
-  use, intrinsic :: iso_fortran_env, only: int64
+  use, intrinsic :: iso_fortran_env, only: int64, real64
   use chess_moves, only: move_text
   use chess_positions, only: position, parse_fen, start_fen
   use chess_movegen, only: generate_legal, move_list
+  use chess_evaluation, only: evaluate
   use chess_draws, only: position_history, reset_history
   use chess_search, only: iterative_search, search_control, search_result, &
     plain_mode, order_mode, table_mode, pvs_mode, aspiration_mode, default_mode, lmr_mode
   implicit none
   private
-  public :: run_bench, bench_mode
+  public :: run_bench, bench_mode, run_eval_bench
 
   type :: bench_case
     character(len=16) :: name
@@ -49,8 +50,8 @@ contains
     end select
   end function bench_mode
 
-  subroutine run_bench(depth, node_limit, mode)
-    integer, intent(in) :: depth, mode
+  subroutine run_bench(depth, node_limit, mode, profile)
+    integer, intent(in) :: depth, mode, profile
     integer(int64), intent(in) :: node_limit
     type(position) :: pos
     type(position_history) :: history
@@ -62,6 +63,7 @@ contains
 
     control%node_limit = node_limit
     control%mode = mode
+    control%evaluation = profile
     do i = 1, size(suite)
       call control%table%clear()
       if (.not. parse_fen(suite(i)%fen, pos)) error stop 'Invalid bench FEN: ' // trim(suite(i)%name)
@@ -80,5 +82,29 @@ contains
       end select
     end do
   end subroutine run_bench
+
+  subroutine run_eval_bench(profile)
+    integer, intent(in) :: profile
+    integer, parameter :: repetitions = 100000
+    type(position) :: positions(size(suite))
+    integer(int64) :: ticks, start, finish, checksum
+    integer :: i, iteration
+    real(real64) :: nanoseconds
+
+    do i = 1, size(suite)
+      if (.not. parse_fen(suite(i)%fen, positions(i))) error stop 'Invalid bench FEN: ' // trim(suite(i)%name)
+    end do
+    checksum = 0
+    call system_clock(start, ticks)
+    do iteration = 1, repetitions
+      do i = 1, size(suite)
+        checksum = checksum + evaluate(positions(i), profile)
+      end do
+    end do
+    call system_clock(finish)
+    nanoseconds = 1.0e9_real64 * real(finish - start, real64) / real(ticks, real64)
+    write (*, '(a,i0,a,f8.1,a,i0)') 'evaluations=', repetitions * size(suite), &
+      ' ns_per_eval=', nanoseconds / (repetitions * size(suite)), ' checksum=', checksum
+  end subroutine run_eval_bench
 
 end module chess_bench

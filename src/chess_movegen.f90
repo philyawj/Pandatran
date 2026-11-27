@@ -32,7 +32,7 @@ module chess_movegen
   integer, parameter :: file_delta(8) = [1, -1, 0, 0, 1, -1, 1, -1]
   integer, parameter :: rank_delta(8) = [0, 0, 1, -1, 1, 1, -1, -1]
 
-  public :: generate_legal, in_check
+  public :: generate_legal, in_check, piece_targets, pawn_pressure
 
 contains
 
@@ -85,6 +85,39 @@ contains
     end do
   end function ray
 
+  pure integer(int64) function piece_targets(origin, kind, occupied) result(targets)
+    integer, intent(in) :: origin, kind
+    integer(int64), intent(in) :: occupied
+    integer, parameter :: first_direction(bishop:queen) = [5, 1, 1]
+    integer, parameter :: last_direction(bishop:queen) = [8, 4, 8]
+    integer :: direction
+
+    targets = 0_int64
+    select case (kind)
+    case (knight)
+      targets = knight_attacks(origin)
+    case (king)
+      targets = king_attacks(origin)
+    case (bishop:queen)
+      do direction = first_direction(kind), last_direction(kind)
+        targets = ior(targets, ray(origin, direction, occupied))
+      end do
+    end select
+  end function piece_targets
+
+  pure integer(int64) function pawn_pressure(pawns, side) result(targets)
+    integer(int64), intent(in) :: pawns
+    integer, intent(in) :: side
+    integer(int64) :: sideways
+
+    sideways = ior(shiftl(iand(pawns, not(file_h)), 1), shiftr(iand(pawns, not(file_a)), 1))
+    if (side == white) then
+      targets = shiftl(sideways, 8)
+    else
+      targets = shiftr(sideways, 8)
+    end if
+  end function pawn_pressure
+
   subroutine generate_legal(pos, list)
     type(position), intent(inout) :: pos
     type(move_list), intent(out) :: list
@@ -109,10 +142,8 @@ contains
   subroutine generate_candidates(pos, list)
     type(position), intent(in) :: pos
     type(move_list), intent(out) :: list
-    integer :: side, opponent, origin, kind, direction, first_ray, last_ray
+    integer :: side, opponent, origin, kind
     integer(int64) :: pieces, occupied, available, captures, targets
-    integer, parameter :: first_direction(bishop:queen) = [5, 1, 1]
-    integer, parameter :: last_direction(bishop:queen) = [8, 4, 8]
 
     list%count = 0
     side = pos%turn
@@ -125,23 +156,11 @@ contains
     do while (pieces /= 0)
       origin = next_square(pieces)
       kind = abs(pos%board(origin))
-      select case (kind)
-      case (pawn)
+      if (kind == pawn) then
         call generate_pawn(pos, origin, captures, occupied, list)
         cycle
-      case (knight)
-        targets = knight_attacks(origin)
-      case (king)
-        targets = king_attacks(origin)
-      case (bishop:queen)
-        first_ray = first_direction(kind)
-        last_ray = last_direction(kind)
-        targets = 0_int64
-        do direction = first_ray, last_ray
-          targets = ior(targets, ray(origin, direction, occupied))
-        end do
-      end select
-      targets = iand(targets, available)
+      end if
+      targets = iand(piece_targets(origin, kind, occupied), available)
       do while (targets /= 0)
         call append_move(list, pack_move(origin, next_square(targets)))
       end do
