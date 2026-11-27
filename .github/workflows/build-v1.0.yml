@@ -40,6 +40,7 @@ jobs:
           PANDATRAN_TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
+          trap 'printf "Build failed at line %s\n" "$LINENO" >&2' ERR
           compiler=gfortran
           if [[ "$RUNNER_OS" == macOS ]]; then
             export SDKROOT="$(xcrun --show-sdk-path)"
@@ -57,12 +58,12 @@ jobs:
             linker=(-Wl,--as-needed)
           fi
           quadmath="$("$compiler" -print-file-name=libquadmath.a)"
-          test -f "$quadmath"
-          libraries=("$quadmath")
+          libraries=()
+          if [[ -f "$quadmath" ]]; then libraries+=("$quadmath"); fi
           if [[ "$RUNNER_OS" == Linux ]]; then
             fortran_runtime="$("$compiler" -print-file-name=libgfortran.a)"
             test -f "$fortran_runtime"
-            libraries=(-Wl,--start-group "$fortran_runtime" "$quadmath" -Wl,--end-group)
+            libraries=(-Wl,--start-group "$fortran_runtime" "${libraries[@]}" -Wl,--end-group)
           fi
           flags=(-O3 -funroll-loops -fcoarray=single -fPIC -fimplicit-none -Werror=implicit-interface -ffree-form -cpp "-D$PANDATRAN_MACRO")
           link_flags=(-static-libgfortran -static-libgcc "${linker[@]}")
@@ -83,7 +84,7 @@ jobs:
           for source in "$GITHUB_WORKSPACE"/test/*.f90; do
             test_name="$(basename "$source" .f90)"
             "$compiler" "${flags[@]}" "${link_flags[@]}" "$source" "${objects[@]}" "${libraries[@]}" -o "test/$test_name"
-            "test/$test_name"
+            "$build/test/$test_name"
           done
 
           ./app/pandatran bench 6 > bench-depth6.txt
