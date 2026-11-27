@@ -178,7 +178,7 @@ The ordering stages are the prior iteration’s best root move or the table hint
 All seven scores and completed depths agreed across modes at both test depths. The depth-three `plain` output also matched the checkpoint 4 signature byte-for-byte. Ordering can change which tied move appears. Timing medians use three serial runs per measured mode on the Mac, alternating mode order. Kiwipete drove most of the savings and fell from 2,005,109 nodes to 27,173 at depth three. Kiwipete’s depth-one work fell from 15,776 to 4,691 nodes.
 
 ```sh
-"$pandatran" bench | diff -u benchmarks/transposition-depth3.txt -
+"$pandatran" bench 3 pvs | diff -u benchmarks/transposition-depth3.txt -
 "$pandatran" bench 3 plain | diff -u benchmarks/tactical-depth3.txt -
 "$pandatran" bench 4 aspiration
 ```
@@ -202,3 +202,40 @@ Runner logs, PGNs and three-run mode comparisons live in `.local/checkpoint-05/`
 | --- | --- |
 | `checkpoint-04.pgn` | `6bf90ce9160df474aac161e114db52e15003b86013fd32e6ca402016f86707fd` |
 | `pandafish.pgn` | `0d3589db6270ffb037a06011dd5a7ea625a08bfe68cf06331465566f68ebd465` |
+
+## Checkpoint 6 selective search
+
+The trials each start from checkpoint 5’s PVS search. Both require a one-centipawn search window, a side that is out of check, non-pawn material on both sides, and at least four non-pawn pieces in total. Mate scores, repeated positions, and positions at or near a potential draw claim stay on the regular search path. The guard tests cover mate, check, pawn opposition, sparse material, and repetition. [Late move reductions](https://chessprogramming.org/Late_Move_Reductions) · [Null move pruning](https://chessprogramming.org/Null_Move_Pruning)
+
+- **Late-move reductions.** At an eligible node with at least three plies remaining, a later non-pawn quiet move can start one ply shallower after three such moves have been searched. Hash moves, castles, and moves that give check get full depth. A reduced result that beats alpha or enters the mate range is searched again at full depth. The six-ply bench performed 3,627 reductions and 29 full-depth retries.
+- **Guarded null move.** The independent trial required at least four plies remaining and a static evaluation at least 25 cp above beta. The pass cleared en passant and left the game clocks and real history untouched. Its artificial line bypassed the table and game-history draw claims. Seven of 44 probes cut off. The extra work increased the fixed-depth node total and gained no depth at the fixed-node cap. The trial ended at that gate. Its executable and source patch are retained under `.local/checkpoint-06/`.
+
+| Six-ply bench mode | Nodes | Median wall time | Reductions / retries | Null probes / cutoffs |
+| --- | ---: | ---: | ---: | ---: |
+| PVS control | 1,104,150 | 2.48 s | 0 / 0 | 0 / 0 |
+| PVS with LMR | 904,681 | 2.00 s | 3,627 / 29 | 0 / 0 |
+| PVS with guarded null move | 1,126,018 | 2.56 s | 0 / 0 | 44 / 7 |
+
+All three modes returned the same scores, moves and completed depths on the seven-position six-ply bench. Each mode reproduced across three serial runs. At 80,000 nodes per position the completed depths agreed. At 700,000 nodes, LMR completed depth six on Kiwipete while PVS completed depth five. Both returned `d5e6` and −23 cp.
+
+### Equal-clock LMR screen
+
+The LMR trial scored **4 wins, 3 draws, and 3 losses** against frozen checkpoint 5 at `10+0.1`. Both engines ran in one game at a time on the Apple M2 Mac, with five reversed-color opening pairs, strict runner checks, zero time margin, and fresh engine processes per game. Independent replay verified 1,294 plies and all ten endings, with zero forfeits. The trial used `args=uci lmr` and the control used its default search. It passed all 40 fastchess compliance checks.
+
+The five pairs yielded a 55% score. A descriptive paired bootstrap spans 30–80%, so the match is weak strength evidence. Median reported search depth was six for both engines. The mean was 6.11 for LMR and 5.98 for the control, with median elapsed time of 0.194 s per move for each. Games reached different positions. The fixed-work results and positive timed screen support carrying LMR forward as the default, with PVS retained as the control mode.
+
+The [six-ply baseline](selective-depth6.txt) records the LMR signature. Use the named control mode for comparisons without reductions.
+
+```sh
+"$pandatran" bench 6 | diff -u benchmarks/selective-depth6.txt -
+"$pandatran" bench 7 700000 pvs
+"$pandatran" uci pvs
+```
+
+The archived trial patch applies to the merged checkpoint 5 source. The trial binary SHA-256 is `1ce50244353d003cd83d5572d160446dca5928bc02b4a63999adcce55d2c6d05`. The LMR screen PGN SHA-256 is `85e5ac9f07ad32083fc43af5e8e1332f82bfde3f02a05a82f08a1437875079a5`. Bench captures, the source patch, runner configurations, raw PGNs, and independent replay reports are under `.local/checkpoint-06/`.
+
+### Frozen Pandafish check
+
+The cleaned checkpoint 6 build reproduced the LMR bench signature and passed debug, release, runtime-check, and all 40 fastchess compliance checks. With LMR as the default it scored **0 wins, 1 draw, and 9 losses** against frozen Pandafish v1.0 at `5+0.05`, using the same five color-swapped opening pairs and runner settings as checkpoint 5. Both checkpoints scored 5% against Pandafish, with the draw moving from opening five to opening two. Independent replay verified 1,036 plies, nine checkmates and one fifty-move draw, with zero forfeits.
+
+The final checkpoint 6 binary SHA-256 is `449516c359a729255601ad4cdc294e59e4d879c423a75fb652bdf932bec2641b`. Its Pandafish PGN SHA-256 is `6360d56e05a248c09a6e91aeb972e489b971e124d52568504e5bf65b12b07515`.
