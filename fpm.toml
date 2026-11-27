@@ -5,3 +5,10 @@ version = "0.1.0"
 implicit-typing = false
 implicit-external = false
 source-form = "free"
+
+[features]
+posix.macos.preprocess.cpp.macros = ["PANDATRAN_MACOS"]
+posix.linux.preprocess.cpp.macros = ["PANDATRAN_LINUX"]
+
+[profiles]
+default = ["posix"]

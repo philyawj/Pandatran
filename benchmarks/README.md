@@ -87,3 +87,30 @@ The release build matched every root move and count from Stockfish 19 for six st
 | Position 6 | 4 | 3,894,594 |
 
 An external python-chess 1.11.2 check compared 432 sampled positions, including 108 depth-two divides. The sample used three 24-position walks from each standard position, selected from coordinate-sorted legal moves with Python’s PRNG seeded at `20261126`. The repository’s Fortran tests independently check state restoration after moves, malformed FEN rejection, and standard and special-move fixtures. Local oracle output is in `.local/checkpoint-02/oracle.txt`.
+
+## Checkpoint 3 UCI and timed smoke games
+
+The engine runs UCI with no arguments. It replays legal position histories and supports depth, nodes, movetime, game clocks, increments, and root move restrictions. It uses iterative, shallow alpha-beta with material and square placement, keeping the best move from the last completed depth or a legal fallback. Mate and stalemate are recognized. Draw history and quiescence are scheduled for checkpoint 4. The transport polls stdin while searching and flushes each response.
+
+Debug, release, and runtime-check tests passed on the Apple M2 Mac. The Fortran pipe fixture exercises split input and CRLF, short budgets, active `isready`, `stop`, replaced searches and positions, terminal positions, `quit` and EOF. fastchess alpha 1.8.3 passed all 40 compliance checks. The Linux-specific stdin binding compiled in a syntax check. Linux runtime verification remains pending.
+
+Both smoke matches used the release build (SHA-256 `0fe087ddf19434501ec00c2456cf982124277344fca33ca3bf368b1e92eaae3f`), the first two development openings, and a `5+0.05` clock with concurrency 1. Only the match runner supplied opening positions. Each game restarted the engines. Stockfish 19 used one thread and 3 MiB of hash. The initial Stockfish Skill 0 run stopped before completing a game because its intentionally weakened move differed from its reported PV. The full-strength run preserved fastchess strict mode.
+
+| Opponent | Pairs | Pandatran W/D/L | Forfeits | Game endings |
+| --- | --- | --- | --- | --- |
+| Frozen Pandafish v1.0 | 2 | 0/0/4 | 0 | 4 checkmates |
+| Stockfish 19 | 2 | 0/0/4 | 0 | 4 checkmates |
+
+External replay with python-chess 1.11.2 verified all 436 plies, all opening pairs, and every result. The sample establishes that both timed matches work and gives an initial score. Raw compliance output, PGNs, runner configurations, and the interrupted reference run are under `.local/checkpoint-03/`.
+
+Use the pinned fastchess and baseline binary paths from checkpoint 1. For Stockfish, substitute `-engine cmd="$stockfish" name=Stockfish-19 option.Threads=1 option.Hash=3` and use separate output names.
+
+```sh
+fastchess -engine cmd="$pandatran" name=Pandatran \
+  -engine cmd="$pandafish" name=Pandafish-v1.0 \
+  -each tc=5+0.05 timemargin=0 restart=on \
+  -openings file="$PWD/benchmarks/development.epd" format=epd order=sequential \
+  -rounds 2 -repeat -concurrency 1 -strict -autosaveinterval 0 \
+  -config outname="$results/pandafish.json" \
+  -pgnout file="$results/pandafish.pgn" append=false
+```

@@ -1,6 +1,6 @@
 program main
   use, intrinsic :: iso_fortran_env, only: error_unit, int64
-  use pandatran, only: engine_name
+  use uci_session, only: run_uci
   use chess_moves, only: max_moves, move_text
   use chess_positions, only: position, parse_fen, start_fen
   use chess_movegen, only: move_list
@@ -15,7 +15,7 @@ program main
 
   select case (command_argument_count())
   case (0)
-    print '(a)', engine_name
+    call run_uci()
     stop
   case (2, 3)
     command = argument(1)
@@ -59,7 +59,7 @@ contains
   end function argument
 
   subroutine usage()
-    write (error_unit, '(a)') 'Usage: pandatran perft <0-8> ["FEN"] | pandatran divide <1-8> ["FEN"]'
+    write (error_unit, '(a)') 'Usage: pandatran | pandatran perft <0-8> ["FEN"] | pandatran divide <1-8> ["FEN"]'
     stop 2
   end subroutine usage
 
