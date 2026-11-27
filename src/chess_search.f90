@@ -5,6 +5,7 @@ module chess_search
   use chess_positions, only: position, undo_state, make_move, unmake_move
   use chess_draws, only: position_history, push_position, pop_position, claimable_draw, automatic_draw, &
     possible_intended_claim, history_key, repetitions, claim_halfmoves
+  use chess_evaluation, only: evaluate, default_eval, ordering_values
   use chess_transpositions, only: transposition_table, exact_bound, lower_bound, upper_bound
   implicit none
   private
@@ -16,13 +17,12 @@ module chess_search
   integer, parameter, public :: lmr_mode = 5
   integer, parameter, public :: default_mode = lmr_mode
   integer, parameter :: aspiration_width = 40
-  integer, parameter :: piece_value(6) = [100, 320, 330, 500, 900, 0]
 
   type, public :: search_control
     integer(int64) :: nodes = 0, node_limit = huge(0_int64)
     integer(int64) :: reductions = 0, reduced_researches = 0
     logical :: interrupted = .false.
-    integer :: mode = default_mode
+    integer :: mode = default_mode, evaluation = default_eval
     type(transposition_table) :: table
   contains
     procedure :: cancelled => uninterruptible
@@ -237,7 +237,7 @@ contains
     if (quiescence) checked = in_check(pos, pos%turn)
     stand_pat = quiescence .and. .not. checked
     score = -infinity
-    if (stand_pat .or. depth <= -max_quiescence) score = evaluate(pos)
+    if (stand_pat .or. depth <= -max_quiescence) score = evaluate(pos, control%evaluation)
     if (can_claim) score = max(score, 0)
 
     if (stand_pat .and. score < 0) then
@@ -338,7 +338,7 @@ contains
     integer :: priorities(size(legal%moves))
     integer :: i, j, count, from, target, attacker, victim, promotion, priority
     integer(int32) :: move
-    integer, parameter :: values(0:6) = [0, piece_value]
+    integer, parameter :: values(0:6) = [0, ordering_values]
 
     count = 0
     do i = 1, legal%count
@@ -369,39 +369,5 @@ contains
     end do
     legal%count = count
   end subroutine order_moves
-
-  pure integer function evaluate(pos) result(score)
-    type(position), intent(in) :: pos
-    integer :: square, piece, kind, rank, file, center, placement
-
-    score = 0
-    do square = 0, 63
-      piece = pos%board(square)
-      if (piece == 0) cycle
-      kind = abs(piece)
-      rank = square / 8
-      if (piece < 0) rank = 7 - rank
-      file = mod(square, 8)
-      center = min(file, 7 - file) + min(rank, 7 - rank)
-      select case (kind)
-      case (pawn)
-        placement = 5 * rank + 3 * min(file, 7 - file)
-      case (knight)
-        placement = 8 * center
-      case (bishop)
-        placement = 5 * center
-      case (rook)
-        placement = 3 * rank
-      case (queen)
-        placement = 2 * center
-      case (king)
-        placement = -3 * center
-      case default
-        placement = 0
-      end select
-      score = score + sign(1, piece) * (piece_value(kind) + placement)
-    end do
-    if (pos%turn /= white) score = -score
-  end function evaluate
 
 end module chess_search

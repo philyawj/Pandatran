@@ -4,6 +4,7 @@ program selective_search
   use chess_positions, only: position, undo_state, make_move, parse_fen, start_fen, to_fen
   use chess_movegen, only: move_list, generate_legal
   use chess_draws, only: position_history, reset_history, history_key, record_game_position
+  use chess_evaluation, only: legacy_eval
   use chess_search, only: iterative_search, search_control, search_result, selective_node, &
     pvs_mode, lmr_mode, mate_score
   implicit none
@@ -85,6 +86,7 @@ contains
     replay = history_key(history)
     fen = to_fen(pos)
     control%mode = mode
+    control%evaluation = legacy_eval
     control%node_limit = huge(0_int64)
     if (present(limit)) control%node_limit = limit
     call control%table%clear()

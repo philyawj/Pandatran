@@ -1,0 +1,7 @@
+case=start move=b1c3 score=23 depth=5 nodes=100000 reductions=216 retries=4
+case=kiwipete move=e2a6 score=10 depth=4 nodes=100000 reductions=0 retries=0
+case=rook-endgame move=b4f4 score=99 depth=6 nodes=11771 reductions=0 retries=0
+case=recapture move=f2f5 score=328 depth=6 nodes=51876 reductions=0 retries=0
+case=quiet-evasion move=b1b7 score=445 depth=6 nodes=13064 reductions=0 retries=0
+case=mate-in-one move=f7g7 score=29999 depth=1 nodes=33 reductions=0 retries=0
+case=dead-bishops move=c1b2 score=0 depth=1 nodes=0 reductions=0 retries=0

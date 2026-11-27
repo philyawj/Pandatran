@@ -38,6 +38,8 @@ gfortran -isysroot "$SDKROOT" fpm-bootstrap.o -o fpm
 
 Reserve the 8-move Stockfish book for confirmation. Its source archive `8moves_v3.pgn.zip` is pinned at `2ec69181c0b1367c5c58bcf5304a79c7b198b655` (CC0-1.0, SHA-256 `7e1e9dd118b4bb97d8a8b5b8a790c86e21f8509d59a27d2883767d94477be02e`). Replay the games in file order and compare their four-field EPD positions. Exclude any game that reaches a development position or shares its four-ply position with one of the development lines. Retain the first occurrence of each remaining 16-ply position as one EPD line. This kept 27,207 of 34,700 positions, hashed as `0967bf9d2faa523b16e8f1c6370e02779ff6ca9ba2853a116df46bf02822962b`. The reserved pool lives in the ignored local artifact directory. Select the final sample with its own recorded seed and match budget, and verify separation from any later development or training data before freezing it. [Pinned Stockfish book and license](https://github.com/official-stockfish/books/tree/2ec69181c0b1367c5c58bcf5304a79c7b198b655)
 
+Checkpoint 7 added six lines to the development exclusions. Use the resulting 21,098-position reserve, described in [checkpoint 7](#checkpoint-7-classical-evaluation), as the starting pool for subsequent exclusions.
+
 ## Reproduce the local pilot
 
 With the pinned `fastchess` on PATH, set `pandafish` to the absolute path of the verified executable and `results` to an existing output directory. Use absolute paths for the opening file and PGN. For the initial serial run, use `10+0.1`, five pairs and concurrency 1.
@@ -178,9 +180,9 @@ The ordering stages are the prior iteration’s best root move or the table hint
 All seven scores and completed depths agreed across modes at both test depths. The depth-three `plain` output also matched the checkpoint 4 signature byte-for-byte. Ordering can change which tied move appears. Timing medians use three serial runs per measured mode on the Mac, alternating mode order. Kiwipete drove most of the savings and fell from 2,005,109 nodes to 27,173 at depth three. Kiwipete’s depth-one work fell from 15,776 to 4,691 nodes.
 
 ```sh
-"$pandatran" bench 3 pvs | diff -u benchmarks/transposition-depth3.txt -
-"$pandatran" bench 3 plain | diff -u benchmarks/tactical-depth3.txt -
-"$pandatran" bench 4 aspiration
+"$pandatran" bench 3 pvs legacy | diff -u benchmarks/transposition-depth3.txt -
+"$pandatran" bench 3 plain legacy | diff -u benchmarks/tactical-depth3.txt -
+"$pandatran" bench 4 aspiration legacy
 ```
 
 ### Timed comparison
@@ -227,9 +229,9 @@ The five pairs yielded a 55% score. A descriptive paired bootstrap spans 30–80
 The [six-ply baseline](selective-depth6.txt) records the LMR signature. Use the named control mode for comparisons without reductions.
 
 ```sh
-"$pandatran" bench 6 | diff -u benchmarks/selective-depth6.txt -
-"$pandatran" bench 7 700000 pvs
-"$pandatran" uci pvs
+"$pandatran" bench 6 lmr legacy | diff -u benchmarks/selective-depth6.txt -
+"$pandatran" bench 7 700000 pvs legacy
+"$pandatran" uci pvs legacy
 ```
 
 The archived trial patch applies to the merged checkpoint 5 source. The trial binary SHA-256 is `1ce50244353d003cd83d5572d160446dca5928bc02b4a63999adcce55d2c6d05`. The LMR screen PGN SHA-256 is `85e5ac9f07ad32083fc43af5e8e1332f82bfde3f02a05a82f08a1437875079a5`. Bench captures, the source patch, runner configurations, raw PGNs, and independent replay reports are under `.local/checkpoint-06/`.
@@ -239,3 +241,90 @@ The archived trial patch applies to the merged checkpoint 5 source. The trial bi
 The cleaned checkpoint 6 build reproduced the LMR bench signature and passed debug, release, runtime-check, and all 40 fastchess compliance checks. With LMR as the default it scored **0 wins, 1 draw, and 9 losses** against frozen Pandafish v1.0 at `5+0.05`, using the same five color-swapped opening pairs and runner settings as checkpoint 5. Both checkpoints scored 5% against Pandafish, with the draw moving from opening five to opening two. Independent replay verified 1,036 plies, nine checkmates and one fifty-move draw, with zero forfeits.
 
 The final checkpoint 6 binary SHA-256 is `449516c359a729255601ad4cdc294e59e4d879c423a75fb652bdf932bec2641b`. Its Pandafish PGN SHA-256 is `6360d56e05a248c09a6e91aeb972e489b971e124d52568504e5bf65b12b07515`.
+
+## Checkpoint 7 classical evaluation
+
+The reference evaluator interpolates material and piece-square scores between middlegame and endgame. Each side contributes one phase unit per knight or bishop, two per rook and four per queen, capped at 24 in total. Piece placement is computed from rank and distance from the center. The king favors shelter in the middlegame and activity in the endgame. The evaluator returns centipawns from the side to move. Material values used to order captures stay fixed across profiles. [Tapered evaluation](https://chessprogramming.org/Tapered_Eval)
+
+Each feature group was tested against the same tapered reference.
+
+- **Pawn structure** penalizes doubled and isolated pawns. It rewards passed pawns by advancement and halves that bonus if the next square is blocked. [Pawn structure](https://chessprogramming.org/Pawn_Structure)
+- **Mobility** counts pseudo-legal destinations for knights, bishops, rooks and queens, excluding squares held by their own side or attacked by opposing pawns. It shares the attack geometry with move generation. [Mobility](https://chessprogramming.org/Mobility)
+- **King safety** scores shields, enemy pawn storms and files with no friendly pawn around the king. It scales with the enemy’s remaining attacking pieces and contributes to the middlegame. [King safety](https://chessprogramming.org/King_Safety)
+
+The [evaluation opening set](evaluation.epd) uses six families from the pinned Lichess Chess Openings dataset in the order below. Its SHA-256 is `f05e9ac378d1117ac09ed877c1d019a3046a9064554c5e2462779901ed227107`. These lines have distinct four-ply positions and share none with the five earlier development lines. [Pinned opening dataset](https://github.com/lichess-org/chess-openings/tree/48a8c0e733facfdc9a3723fe882e51ec28014074)
+
+| Opening | Source moves |
+| --- | --- |
+| A29 English Opening, Fianchetto Line | 1. c4 e5 2. Nc3 Nf6 3. Nf3 Nc6 4. g3 |
+| B12 Caro-Kann Defense, Short Variation | 1. e4 c6 2. d4 d5 3. e5 Bf5 4. Nf3 |
+| C42 Petrov’s Defense, Classical Attack | 1. e4 e5 2. Nf3 Nf6 3. Nxe5 d6 4. Nf3 Nxe4 5. d4 |
+| B08 Pirc Defense, Classical Variation | 1. e4 d6 2. d4 Nf6 3. Nc3 g6 4. Nf3 |
+| A90 Dutch Defense, Classical Variation | 1. d4 f5 2. c4 Nf6 3. g3 e6 4. Bg2 |
+| E32 Nimzo-Indian Defense, Classical Variation | 1. d4 Nf6 2. c4 e6 3. Nc3 Bb4 4. Qc2 |
+
+To update the confirmation reserve, apply the original exclusions plus these six lines to the source PGN before deduplication. For each game, check whether any position is equal to one of the development EPDs or whether its four-ply EPD matches any development family. Preserve source order and only include positions already eligible in checkpoint 1. This left 21,098 positions in `.local/checkpoint-07/confirmation-reserve-filtered.epd`, with SHA-256 `04522db71abe09029c3117fdacdc242df10e3df160f06e8bbf8cf8f481472eea`. No games were played from that reserve.
+
+### Evaluation cost
+
+The table reports medians of three serial runs per profile with the release build on the M2 Mac. `evalbench` measures 700,000 static evaluations over seven fixed positions. The search bench allowed six plies and capped each position at 100,000 nodes. All profiles completed the same depth on each position, including depth four on Kiwipete. The full evaluator took 3.1 times as long per evaluation as legacy, with a 5% increase in search wall time on this workload. Mobility was the costliest individual group.
+
+| Profile | ns per evaluation | Capped search nodes | Capped wall time |
+| --- | ---: | ---: | ---: |
+| Legacy | 37.9 | 290,414 | 0.476 s |
+| Tapered | 31.2 | 278,142 | 0.459 s |
+| Pawns | 47.8 | 272,418 | 0.461 s |
+| Mobility | 88.3 | 303,663 | 0.530 s |
+| King safety | 43.1 | 276,177 | 0.457 s |
+| Full combination | 117.0 | 276,744 | 0.499 s |
+
+### Timed screens
+
+The frozen checkpoint 6 build was the control for the tapered reference. The remaining rows held tapered evaluation and LMR constant and added one feature group. Initial screens used six color-swapped opening pairs at `5+0.05` on the M2 Mac. Every match ran one game at a time with fresh processes, zero time margin and strict checks. Several comparisons ran side by side on the eight-core host. Independent replay verified opening order, color swaps, and all 5,445 plies and endings in the initial screens.
+
+| Candidate | Control | W/D/L | Score | Forfeits |
+| --- | --- | ---: | ---: | ---: |
+| Tapered base | Frozen checkpoint 6 | 9/2/1 | 83.3% | 0 |
+| Tapered plus pawn structure | Tapered base | 6/2/4 | 58.3% | 0 |
+| Tapered plus mobility | Tapered base | 5/3/4 | 54.2% | 0 |
+| Tapered plus king safety | Tapered base | 9/0/3 | 75.0% | 0 |
+
+All three groups scored above 50%, so the second screen compared the full combination with the strongest single group, king safety. That match and the three cross-checks below used the five earlier development lines, covering different opening families from the initial screens. No coefficients were fitted.
+
+| Candidate | Opponent | Clock | W/D/L | Score | Forfeits |
+| --- | --- | --- | ---: | ---: | ---: |
+| Tapered plus king safety | Frozen checkpoint 6 | `10+0.1` | 5/2/3 | 60% | 0 |
+| Full combination | Tapered plus king safety | `10+0.1` | 8/0/2 | 80% | 0 |
+| Tapered plus king safety | Frozen Pandafish v1.0 | `5+0.05` | 2/2/6 | 30% | 0 |
+| Full combination | Frozen Pandafish v1.0 | `5+0.05` | 2/3/5 | 35% | 0 |
+
+The full combination is the default. Its score against Pandafish increased from checkpoint 6’s 5% to 35% over the same openings and clock. Resampling those five opening pairs gives a descriptive 95% interval of +15 to +45 percentage points for the change. The sample supports carrying the evaluator forward. Pandafish still led this screen, with a median reported depth of six to Pandatran’s five. Independent replay verified all 4,573 follow-up plies and their rule endings.
+
+The launch profile applies to the entire engine process. Use `legacy` for the checkpoint 6 evaluator, `tapered` for phase-interpolated material and placement, or `pawns`, `mobility`, and `safety` to add one group. The combinations are `pawns+mobility`, `pawns+safety`, `mobility+safety`, and `all`. A normal UCI launch with no arguments uses `all`.
+
+```sh
+"$pandatran" bench 6 100000 | diff -u benchmarks/evaluation-depth6-100k.txt -
+"$pandatran" evalbench all
+fastchess -engine cmd="$pandatran" 'args=uci lmr safety' name=safety \
+  -engine cmd="$pandatran" 'args=uci lmr tapered' name=tapered \
+  -each tc=5+0.05 timemargin=0 restart=on \
+  -openings file="$PWD/benchmarks/evaluation.epd" format=epd order=sequential \
+  -rounds 6 -repeat -concurrency 1 -strict -autosaveinterval 0 \
+  -config outname="$results/safety-vs-tapered.json" \
+  -pgnout file="$results/safety-vs-tapered.pgn" append=false
+```
+
+Debug, release, and Fortran runtime-check tests passed. The default UCI launch passed all 40 fastchess compliance checks and reproduced the trial’s fixed-depth search through UCI. The legacy profile reproduced the checkpoint 4, 5 and 6 signatures. Move generation matched Stockfish on 14 perft fixtures and python-chess on 432 sampled positions.
+
+Match logs, runner configurations, and independent replay summaries are under `.local/checkpoint-07/`. The match trial binary SHA-256 was `f0f5448db27953f89a44fe98e6329bdf45fc0584e32ab95ad3163057f2d1fe32`. The final default build SHA-256 is `206756a90595ff64c373f3b076555859ce0286931632b4cf4eb48feaefa66eb1`. The frozen Pandafish opponent is the checkpoint 1 macOS ARM64 release. The checkpoint 6 opponent is the frozen default build listed above.
+
+| PGN | SHA-256 |
+| --- | --- |
+| `tapered-vs-legacy.pgn` | `f3bd640bf7d12e3c0cfac07acb1d053f4cd01eb5bf437ddc14e0d1ff12a84888` |
+| `pawns-vs-tapered.pgn` | `b5e1c0ff470735187eeda282cb028618f61e0c91171ae5157af1bcf4251d7f2e` |
+| `mobility-vs-tapered.pgn` | `bfd4b4a3d7c426d81d4a6e070ef995fa507ec00cb0a11424f1bdc60fc87945b6` |
+| `safety-vs-tapered.pgn` | `bd11357c4867d9985efceda5c787232e664de8b8ea4ef73dbd0846f85e3fc15f` |
+| `safety-vs-checkpoint-06.pgn` | `1ce3f7a9553b37281d72e31bf749437df9a957ddae01914379a1f3ec1c0cb5e2` |
+| `all-vs-safety.pgn` | `8bdce16260758d91b3ab44115295471b9e900607bba505dbd6202c945c5fd84c` |
+| `safety-vs-Pandafish-v1.0.pgn` | `f73557d8425d5f60e2a1025b84c33e5df0cadda9628368b95c2c241ab1030c1a` |
+| `all-vs-Pandafish-v1.0.pgn` | `a6d3849fc95032cd88b992853aa10151649d76ce7a047228e38afe10cd6d3483` |
