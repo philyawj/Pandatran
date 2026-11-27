@@ -20,6 +20,13 @@ program main
     stop
   end if
   command = argument(1)
+  if (command == 'uci') then
+    if (argc /= 2) call usage()
+    mode = bench_mode(argument(2))
+    if (mode < 0) call usage()
+    call run_uci(mode)
+    stop
+  end if
   if (command == 'bench') then
     if (argc > 4) call usage()
     depth = 3
@@ -96,7 +103,8 @@ contains
   subroutine usage()
     write (error_unit, '(a)') 'Usage: pandatran | pandatran perft <0-8> ["FEN"] | pandatran divide <1-8> ["FEN"]'
     write (error_unit, '(a)') '       pandatran bench [depth 1-8 [nodes per position] [mode]]'
-    write (error_unit, '(a)') '       modes: default, plain, order, table, pvs, aspiration'
+    write (error_unit, '(a)') '       pandatran uci <mode>'
+    write (error_unit, '(a)') '       modes: default, plain, order, table, pvs, aspiration, lmr'
     stop 2
   end subroutine usage
 

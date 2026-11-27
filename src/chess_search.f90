@@ -4,7 +4,7 @@ module chess_search
   use chess_movegen, only: generate_legal, in_check, move_list
   use chess_positions, only: position, undo_state, make_move, unmake_move
   use chess_draws, only: position_history, push_position, pop_position, claimable_draw, automatic_draw, &
-    possible_intended_claim, history_key
+    possible_intended_claim, history_key, repetitions, claim_halfmoves
   use chess_transpositions, only: transposition_table, exact_bound, lower_bound, upper_bound
   implicit none
   private
@@ -13,12 +13,14 @@ module chess_search
   integer, parameter :: quiet_limit = 10, max_quiescence = 16, infinity = 32000
   integer, parameter, public :: mate_threshold = mate_score - max_search_depth - max_quiescence
   integer, parameter, public :: plain_mode = 0, order_mode = 1, table_mode = 2, pvs_mode = 3, aspiration_mode = 4
-  integer, parameter, public :: default_mode = pvs_mode
+  integer, parameter, public :: lmr_mode = 5
+  integer, parameter, public :: default_mode = lmr_mode
   integer, parameter :: aspiration_width = 40
   integer, parameter :: piece_value(6) = [100, 320, 330, 500, 900, 0]
 
   type, public :: search_control
     integer(int64) :: nodes = 0, node_limit = huge(0_int64)
+    integer(int64) :: reductions = 0, reduced_researches = 0
     logical :: interrupted = .false.
     integer :: mode = default_mode
     type(transposition_table) :: table
@@ -39,7 +41,7 @@ module chess_search
     end subroutine report_progress
   end interface
 
-  public :: iterative_search
+  public :: iterative_search, selective_node
 
 contains
 
@@ -61,6 +63,8 @@ contains
     integer :: depth, alpha, beta
 
     control%nodes = 0
+    control%reductions = 0
+    control%reduced_researches = 0
     control%interrupted = .false.
     result = search_result()
     if (roots%count == 0) then
@@ -88,7 +92,7 @@ contains
       end if
       alpha = -infinity
       beta = infinity
-      if (control%mode >= aspiration_mode .and. depth > 1 .and. abs(result%score) < mate_threshold) then
+      if (control%mode == aspiration_mode .and. depth > 1 .and. abs(result%score) < mate_threshold) then
         alpha = result%score - aspiration_width
         beta = result%score + aspiration_width
       end if
@@ -125,7 +129,7 @@ contains
         return
       end if
       score = search_branch(pos, history, roots%moves(i), depth - 1, 1, bound, beta, control, &
-        i > 1 .and. control%mode >= pvs_mode)
+        i > 1 .and. control%mode >= pvs_mode, .false.)
       if (control%interrupted) return
       if (score > result%score) then
         result%score = score
@@ -136,33 +140,44 @@ contains
     end do
   end subroutine search_depth
 
-  recursive integer function search_branch(pos, history, move, depth, ply, alpha, beta, control, scout) result(score)
+  recursive integer function search_branch(pos, history, move, depth, ply, alpha, beta, control, scout, reduce) result(score)
     type(position), intent(inout) :: pos
     type(position_history), intent(inout) :: history
     integer(int32), intent(in) :: move
     integer, intent(in) :: depth, ply, alpha, beta
     class(search_control), intent(inout) :: control
-    logical, intent(in) :: scout
+    logical, intent(in) :: scout, reduce
 
     if (scout .and. alpha + 1 < beta) then
-      score = search_move(pos, history, move, depth, ply, alpha, alpha + 1, control)
+      score = search_move(pos, history, move, depth, ply, alpha, alpha + 1, control, .false.)
       if (control%interrupted .or. score <= alpha .or. score >= beta) return
     end if
-    score = search_move(pos, history, move, depth, ply, alpha, beta, control)
+    score = search_move(pos, history, move, depth, ply, alpha, beta, control, reduce)
   end function search_branch
 
-  recursive integer function search_move(pos, history, move, depth, ply, alpha, beta, control) result(score)
+  recursive integer function search_move(pos, history, move, depth, ply, alpha, beta, control, reduce) result(score)
     type(position), intent(inout) :: pos
     type(position_history), intent(inout) :: history
     integer(int32), intent(in) :: move
     integer, intent(in) :: depth, ply, alpha, beta
     class(search_control), intent(inout) :: control
+    logical, intent(in) :: reduce
     type(undo_state) :: undo
-    logical :: can_claim
+    logical :: can_claim, full_depth
 
     call make_move(pos, move, undo)
     call push_position(pos, history)
-    score = -negamax(pos, history, depth, ply, -beta, -alpha, control, can_claim)
+    full_depth = .true.
+    if (reduce) then
+      if (.not. in_check(pos, pos%turn)) then
+        control%reductions = control%reductions + 1
+        score = -negamax(pos, history, depth - 1, ply, -beta, -alpha, control, can_claim)
+        if (can_claim) score = max(score, 0)
+        full_depth = .not. control%interrupted .and. (score > alpha .or. abs(score) >= mate_threshold)
+        if (full_depth) control%reduced_researches = control%reduced_researches + 1
+      end if
+    end if
+    if (full_depth) score = -negamax(pos, history, depth, ply, -beta, -alpha, control, can_claim)
     call pop_position(history)
     call unmake_move(pos, move, undo)
     ! Before playing this move the mover could instead claim the draw it creates.
@@ -176,8 +191,8 @@ contains
     class(search_control), intent(inout) :: control
     logical, intent(out) :: can_claim
     type(move_list) :: legal
-    logical :: quiescence, checked, stand_pat, cache, hit
-    integer :: i, child, bound
+    logical :: quiescence, checked, stand_pat, cache, hit, selective, reduce, quiet
+    integer :: i, child, bound, quiet_searched
     integer(int32) :: hint, best_move
     integer(int16) :: result_bound
     integer(int64) :: context
@@ -215,6 +230,8 @@ contains
     end if
     if (automatic_draw(pos, history)) return
     can_claim = claimable_draw(pos, history)
+    selective = .false.
+    if (control%mode == lmr_mode) selective = selective_node(pos, history, depth, alpha, beta)
 
     checked = .false.
     if (quiescence) checked = in_check(pos, pos%turn)
@@ -237,9 +254,16 @@ contains
     end if
     bound = max(alpha, score)
     best_move = 0
+    quiet_searched = 0
     do i = 1, legal%count
+      reduce = .false.
+      if (selective) then
+        quiet = ordinary_quiet(pos, legal%moves(i))
+        reduce = quiet .and. quiet_searched >= 3 .and. legal%moves(i) /= hint
+        if (quiet) quiet_searched = quiet_searched + 1
+      end if
       child = search_branch(pos, history, legal%moves(i), depth - 1, ply + 1, bound, beta, control, &
-        i > 1 .and. .not. quiescence .and. control%mode >= pvs_mode)
+        i > 1 .and. .not. quiescence .and. control%mode >= pvs_mode, reduce)
       if (control%interrupted) return
       if (child > score) then
         score = child
@@ -256,6 +280,34 @@ contains
       call control%table%store(pos%key, context, pos%halfmove, depth, ply, score, result_bound, best_move)
     end if
   end function negamax
+
+  logical function selective_node(pos, history, depth, alpha, beta) result(eligible)
+    type(position), intent(in) :: pos
+    type(position_history), intent(in) :: history
+    integer, intent(in) :: depth, alpha, beta
+    integer :: material(2)
+
+    eligible = .false.
+    if (depth < 3 .or. beta /= alpha + 1) return
+    if (abs(alpha) >= mate_threshold .or. abs(beta) >= mate_threshold) return
+    if (pos%halfmove >= claim_halfmoves - 10 .or. repetitions(history) > 1) return
+    material = sum(popcnt(pos%pieces(knight:queen, :)), dim=1)
+    if (any(material == 0) .or. sum(material) < 4) return
+    if (possible_intended_claim(pos, history)) return
+    eligible = .not. in_check(pos, pos%turn)
+  end function selective_node
+
+  pure logical function ordinary_quiet(pos, move) result(quiet)
+    type(position), intent(in) :: pos
+    integer(int32), intent(in) :: move
+    integer :: origin, target, piece
+
+    origin = move_from(move)
+    target = move_to(move)
+    piece = abs(pos%board(origin))
+    quiet = piece /= pawn .and. pos%board(target) == 0 .and. move_promotion(move) == 0
+    if (piece == king .and. abs(target - origin) == 2) quiet = .false.
+  end function ordinary_quiet
 
   logical function quiet_claim(pos, history, legal) result(found)
     type(position), intent(inout) :: pos

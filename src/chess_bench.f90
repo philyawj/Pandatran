@@ -5,7 +5,7 @@ module chess_bench
   use chess_movegen, only: generate_legal, move_list
   use chess_draws, only: position_history, reset_history
   use chess_search, only: iterative_search, search_control, search_result, &
-    plain_mode, order_mode, table_mode, pvs_mode, aspiration_mode, default_mode
+    plain_mode, order_mode, table_mode, pvs_mode, aspiration_mode, default_mode, lmr_mode
   implicit none
   private
   public :: run_bench, bench_mode
@@ -42,6 +42,8 @@ contains
       mode = pvs_mode
     case ('aspiration')
       mode = aspiration_mode
+    case ('lmr')
+      mode = lmr_mode
     case default
       mode = -1
     end select
@@ -68,8 +70,14 @@ contains
       call iterative_search(pos, history, roots, depth, control, result)
       move = '0000'
       if (result%move /= 0) move = move_text(result%move)
-      write (*, '(3a,a,a,i0,a,i0,a,i0)') 'case=', trim(suite(i)%name), ' move=', trim(move), &
+      write (*, '(3a,a,a,i0,a,i0,a,i0)', advance='no') 'case=', trim(suite(i)%name), ' move=', trim(move), &
         ' score=', result%score, ' depth=', result%depth, ' nodes=', control%nodes
+      select case (mode)
+      case (lmr_mode)
+        write (*, '(a,i0,a,i0)') ' reductions=', control%reductions, ' retries=', control%reduced_researches
+      case default
+        write (*, '(a)') ''
+      end select
     end do
   end subroutine run_bench
 
