@@ -1,0 +1,7 @@
+name = "pandatran"
+version = "0.1.0"
+
+[fortran]
+implicit-typing = false
+implicit-external = false
+source-form = "free"
