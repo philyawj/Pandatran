@@ -1,5 +1,7 @@
 # Benchmark setup
 
+The first formal Pandafish match is recorded in the [step 10 confirmation report](CONFIRMATION.md).
+
 ## Checkpoint 1 baseline
 
 The frozen opponent is Pandafish v1.0 at commit `27a34937c2aaee23d6e22bf60cee9b0075c16ad6`. The release manifest records Go 1.25.0, `-trimpath` and `-buildvcs=false`. Both archives match the release’s `SHA256SUMS`, and both extracted executables match its build manifest. The macOS binary responded with `id name Pandafish v1.0`, `uciok` and `readyok`. The Linux binary was verified by hash on the Mac. [Pandafish v1.0 release](https://github.com/philyawj/Pandafish/releases/tag/v1.0)
