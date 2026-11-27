@@ -3,6 +3,7 @@ module chess_draws
   use chess_moves, only: pawn, knight, bishop, rook, queen, no_square, pawn_step, colored_piece, pack_move
   use chess_positions, only: position, undo_state, make_move, unmake_move
   use chess_movegen, only: in_check
+  use chess_hashes, only: extend_history_key
   implicit none
   private
 
@@ -11,7 +12,7 @@ module chess_draws
   integer, parameter :: search_path = 128
 
   type :: repetition_entry
-    integer(int64) :: occupied(2) = 0, pieces(6, 2) = 0
+    integer(int64) :: occupied(2) = 0, pieces(6, 2) = 0, context = 0
     integer :: turn = 0, castling = 0, ep = no_square, occurrences = 0
   end type repetition_entry
 
@@ -22,7 +23,7 @@ module chess_draws
   end type position_history
 
   public :: reset_history, record_game_position, push_position, pop_position, repetitions
-  public :: claimable_draw, automatic_draw, possible_intended_claim, dead_material
+  public :: claimable_draw, automatic_draw, possible_intended_claim, dead_material, history_key
 
 contains
 
@@ -57,6 +58,12 @@ contains
     entry%castling = pos%castling
     entry%ep = repetition_ep(pos)
     entry%occurrences = 1
+    entry%context = pos%key
+    if (history%count > 0 .and. pos%halfmove > 0) then
+      associate (previous => history%entries(history%count))
+        if (previous%castling == pos%castling) entry%context = extend_history_key(previous%context, pos%key)
+      end associate
+    end if
     oldest = first_reversible(pos, history%count + 1)
 
     ! A legal position cannot recur in fewer than four plies.
@@ -78,6 +85,11 @@ contains
     type(position_history), intent(inout) :: history
     history%count = history%count - 1
   end subroutine pop_position
+
+  pure integer(int64) function history_key(history) result(key)
+    type(position_history), intent(in) :: history
+    key = history%entries(history%count)%context
+  end function history_key
 
   pure integer function repetitions(history) result(count)
     type(position_history), intent(in) :: history

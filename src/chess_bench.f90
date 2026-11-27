@@ -4,10 +4,11 @@ module chess_bench
   use chess_positions, only: position, parse_fen, start_fen
   use chess_movegen, only: generate_legal, move_list
   use chess_draws, only: position_history, reset_history
-  use chess_search, only: iterative_search, search_control, search_result
+  use chess_search, only: iterative_search, search_control, search_result, &
+    plain_mode, order_mode, table_mode, pvs_mode, aspiration_mode, default_mode
   implicit none
   private
-  public :: run_bench
+  public :: run_bench, bench_mode
 
   type :: bench_case
     character(len=16) :: name
@@ -25,8 +26,29 @@ module chess_bench
 
 contains
 
-  subroutine run_bench(depth, node_limit)
-    integer, intent(in) :: depth
+  integer function bench_mode(name) result(mode)
+    character(len=*), intent(in) :: name
+
+    select case (name)
+    case ('default')
+      mode = default_mode
+    case ('plain')
+      mode = plain_mode
+    case ('order')
+      mode = order_mode
+    case ('table')
+      mode = table_mode
+    case ('pvs')
+      mode = pvs_mode
+    case ('aspiration')
+      mode = aspiration_mode
+    case default
+      mode = -1
+    end select
+  end function bench_mode
+
+  subroutine run_bench(depth, node_limit, mode)
+    integer, intent(in) :: depth, mode
     integer(int64), intent(in) :: node_limit
     type(position) :: pos
     type(position_history) :: history
@@ -37,7 +59,9 @@ contains
     integer :: i
 
     control%node_limit = node_limit
+    control%mode = mode
     do i = 1, size(suite)
+      call control%table%clear()
       if (.not. parse_fen(suite(i)%fen, pos)) error stop 'Invalid bench FEN: ' // trim(suite(i)%name)
       call reset_history(pos, history)
       call generate_legal(pos, roots)

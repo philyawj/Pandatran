@@ -1,21 +1,27 @@
 module chess_search
-  use, intrinsic :: iso_fortran_env, only: int32, int64
+  use, intrinsic :: iso_fortran_env, only: int16, int32, int64
   use chess_moves, only: white, pawn, knight, bishop, rook, queen, king, move_from, move_to, move_promotion
   use chess_movegen, only: generate_legal, in_check, move_list
   use chess_positions, only: position, undo_state, make_move, unmake_move
   use chess_draws, only: position_history, push_position, pop_position, claimable_draw, automatic_draw, &
-    possible_intended_claim
+    possible_intended_claim, history_key
+  use chess_transpositions, only: transposition_table, exact_bound, lower_bound, upper_bound
   implicit none
   private
 
   integer, parameter, public :: max_search_depth = 64, mate_score = 30000
   integer, parameter :: quiet_limit = 10, max_quiescence = 16, infinity = 32000
   integer, parameter, public :: mate_threshold = mate_score - max_search_depth - max_quiescence
+  integer, parameter, public :: plain_mode = 0, order_mode = 1, table_mode = 2, pvs_mode = 3, aspiration_mode = 4
+  integer, parameter, public :: default_mode = pvs_mode
+  integer, parameter :: aspiration_width = 40
   integer, parameter :: piece_value(6) = [100, 320, 330, 500, 900, 0]
 
   type, public :: search_control
     integer(int64) :: nodes = 0, node_limit = huge(0_int64)
     logical :: interrupted = .false.
+    integer :: mode = default_mode
+    type(transposition_table) :: table
   contains
     procedure :: cancelled => uninterruptible
   end type search_control
@@ -51,7 +57,8 @@ contains
     type(search_result), intent(out) :: result
     procedure(report_progress), optional :: on_depth
     type(search_result) :: candidate
-    integer :: depth
+    type(move_list) :: ordered
+    integer :: depth, alpha, beta
 
     control%nodes = 0
     control%interrupted = .false.
@@ -67,11 +74,30 @@ contains
       return
     end if
 
+    if (control%mode >= table_mode) call control%table%prepare()
     do depth = 1, depth_limit
       if (control%cancelled()) exit
       candidate%depth = depth
-      call search_depth(pos, history, roots, depth, control, candidate)
+      ordered = roots
+      if (control%mode >= order_mode) then
+        if (depth == 1) then
+          call order_moves(pos, ordered, .true., 0_int32)
+        else
+          call order_moves(pos, ordered, .true., result%move)
+        end if
+      end if
+      alpha = -infinity
+      beta = infinity
+      if (control%mode >= aspiration_mode .and. depth > 1 .and. abs(result%score) < mate_threshold) then
+        alpha = result%score - aspiration_width
+        beta = result%score + aspiration_width
+      end if
+      call search_depth(pos, history, ordered, depth, alpha, beta, control, candidate)
       if (control%interrupted) exit
+      if (candidate%score <= alpha .or. candidate%score >= beta) then
+        call search_depth(pos, history, ordered, depth, -infinity, infinity, control, candidate)
+        if (control%interrupted) exit
+      end if
       result = candidate
       if (present(on_depth)) call on_depth(result, control%nodes)
       if (control%nodes >= control%node_limit) exit
@@ -81,30 +107,49 @@ contains
     end do
   end subroutine iterative_search
 
-  subroutine search_depth(pos, history, roots, depth, control, result)
+  subroutine search_depth(pos, history, roots, depth, alpha, beta, control, result)
     type(position), intent(inout) :: pos
     type(position_history), intent(inout) :: history
     type(move_list), intent(in) :: roots
-    integer, intent(in) :: depth
+    integer, intent(in) :: depth, alpha, beta
     class(search_control), intent(inout) :: control
     type(search_result), intent(inout) :: result
-    integer :: i, score
+    integer :: i, score, bound
 
     result%score = -infinity
     result%move = roots%moves(1)
+    bound = alpha
     do i = 1, roots%count
       if (control%cancelled()) then
         control%interrupted = .true.
         return
       end if
-      score = search_move(pos, history, roots%moves(i), depth - 1, 1, result%score, infinity, control)
+      score = search_branch(pos, history, roots%moves(i), depth - 1, 1, bound, beta, control, &
+        i > 1 .and. control%mode >= pvs_mode)
       if (control%interrupted) return
       if (score > result%score) then
         result%score = score
         result%move = roots%moves(i)
       end if
+      if (score >= beta) exit
+      bound = max(bound, score)
     end do
   end subroutine search_depth
+
+  recursive integer function search_branch(pos, history, move, depth, ply, alpha, beta, control, scout) result(score)
+    type(position), intent(inout) :: pos
+    type(position_history), intent(inout) :: history
+    integer(int32), intent(in) :: move
+    integer, intent(in) :: depth, ply, alpha, beta
+    class(search_control), intent(inout) :: control
+    logical, intent(in) :: scout
+
+    if (scout .and. alpha + 1 < beta) then
+      score = search_move(pos, history, move, depth, ply, alpha, alpha + 1, control)
+      if (control%interrupted .or. score <= alpha .or. score >= beta) return
+    end if
+    score = search_move(pos, history, move, depth, ply, alpha, beta, control)
+  end function search_branch
 
   recursive integer function search_move(pos, history, move, depth, ply, alpha, beta, control) result(score)
     type(position), intent(inout) :: pos
@@ -131,8 +176,11 @@ contains
     class(search_control), intent(inout) :: control
     logical, intent(out) :: can_claim
     type(move_list) :: legal
-    logical :: quiescence, checked, stand_pat
+    logical :: quiescence, checked, stand_pat, cache, hit
     integer :: i, child, bound
+    integer(int32) :: hint, best_move
+    integer(int16) :: result_bound
+    integer(int64) :: context
 
     score = 0
     can_claim = .false.
@@ -147,6 +195,19 @@ contains
       end if
     end if
     control%nodes = control%nodes + 1
+    quiescence = depth <= 0
+    cache = .not. quiescence .and. control%mode >= table_mode
+    context = 0
+    hint = 0
+    if (cache) then
+      context = history_key(history)
+      call control%table%probe(pos%key, context, pos%halfmove, depth, ply, alpha, beta, hit, score, hint)
+      if (hit) then
+        can_claim = claimable_draw(pos, history)
+        return
+      end if
+      score = 0
+    end if
     call generate_legal(pos, legal)
     if (legal%count == 0) then
       if (in_check(pos, pos%turn)) score = ply - mate_score
@@ -155,7 +216,6 @@ contains
     if (automatic_draw(pos, history)) return
     can_claim = claimable_draw(pos, history)
 
-    quiescence = depth <= 0
     checked = .false.
     if (quiescence) checked = in_check(pos, pos%turn)
     stand_pat = quiescence .and. .not. checked
@@ -170,15 +230,31 @@ contains
     end if
     if (score >= beta .or. depth <= -max_quiescence) return
     if (stand_pat .and. depth <= -quiet_limit) return
-    if (quiescence) call order_quiescence(pos, legal, checked)
+    if (quiescence) then
+      call order_moves(pos, legal, checked, 0_int32)
+    else if (control%mode >= order_mode) then
+      call order_moves(pos, legal, .true., hint)
+    end if
     bound = max(alpha, score)
+    best_move = 0
     do i = 1, legal%count
-      child = search_move(pos, history, legal%moves(i), depth - 1, ply + 1, bound, beta, control)
+      child = search_branch(pos, history, legal%moves(i), depth - 1, ply + 1, bound, beta, control, &
+        i > 1 .and. .not. quiescence .and. control%mode >= pvs_mode)
       if (control%interrupted) return
-      score = max(score, child)
-      if (score >= beta) return
+      if (child > score) then
+        score = child
+        best_move = legal%moves(i)
+      end if
+      if (score >= beta) exit
       bound = max(bound, score)
     end do
+
+    if (cache) then
+      result_bound = exact_bound
+      if (score <= alpha) result_bound = upper_bound
+      if (score >= beta) result_bound = lower_bound
+      call control%table%store(pos%key, context, pos%halfmove, depth, ply, score, result_bound, best_move)
+    end if
   end function negamax
 
   logical function quiet_claim(pos, history, legal) result(found)
@@ -202,10 +278,11 @@ contains
     found = .false.
   end function quiet_claim
 
-  subroutine order_quiescence(pos, legal, checked)
+  subroutine order_moves(pos, legal, include_quiets, hint)
     type(position), intent(in) :: pos
     type(move_list), intent(inout) :: legal
-    logical, intent(in) :: checked
+    logical, intent(in) :: include_quiets
+    integer(int32), intent(in) :: hint
     integer :: priorities(size(legal%moves))
     integer :: i, j, count, from, target, attacker, victim, promotion, priority
     integer(int32) :: move
@@ -221,11 +298,12 @@ contains
       if (target == pos%ep .and. attacker == pawn) victim = pawn
       promotion = move_promotion(move)
       if (victim == 0 .and. promotion == 0) then
-        if (.not. checked) cycle
+        if (.not. include_quiets) cycle
         priority = -infinity
       else
         priority = 16 * (values(victim) + values(promotion)) - values(attacker)
       end if
+      if (move == hint) priority = infinity
       j = count
       do while (j > 0)
         if (priorities(j) >= priority) exit
@@ -238,7 +316,7 @@ contains
       count = count + 1
     end do
     legal%count = count
-  end subroutine order_quiescence
+  end subroutine order_moves
 
   pure integer function evaluate(pos) result(score)
     type(position), intent(in) :: pos

@@ -56,6 +56,7 @@ contains
       case ('isready')
         call send_line('readyok')
       case ('ucinewgame')
+        call control%table%clear()
         call reset_history(pos, history)
       case ('position')
         if (.not. set_position(line, cursor, pos, history)) call send_line('info string invalid position')

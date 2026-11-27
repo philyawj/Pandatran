@@ -94,8 +94,8 @@ program uci_pipes
   call send(repeat(' ', 5000) // 'isready' // lf)
   call expect(first_engine, 'readyok')
 
-  call send('position startpos' // lf // 'go nodes 21' // lf)
-  call expect(first_engine, 'info depth 1 nodes 20 ', prefix=.true.)
+  call send('position startpos' // lf // 'go nodes 3 searchmoves b1c3 g1f3' // lf)
+  call expect(first_engine, 'info depth 1 nodes 2 ', prefix=.true.)
   call expect(first_engine, 'bestmove b1c3')
 
   call send('position startpos moves e2e4 c7c5 g1f3' // lf // 'go depth 1 searchmoves d7d5' // lf)
