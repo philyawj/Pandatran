@@ -6,7 +6,13 @@ Pandatran is a from-scratch chess engine project in modern Fortran. The goal is 
 
 The engine will start with classical search and evaluation and speak UCI for match testing and eventual lichess-bot play. Project-owned engine code, tests, and tools will be written in Fortran.
 
-Development starts with checkpoint 1, the build and benchmark setup.
+The current executable is a build smoke test. To run it and its tests with gfortran and fpm installed:
+
+```sh
+fpm run
+fpm test
+```
 
 - [Initial research](INITIAL_RESEARCH.MD)
 - [Implementation plan](IMPLEMENTATION_PLAN.MD)
+- [Benchmark setup](benchmarks/README.md)
