@@ -1,0 +1,122 @@
+name: Build Pandatran v1.0 binaries
+
+on:
+  push:
+    branches: [release/v1.0-packaging]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-15
+            macro: PANDATRAN_MACOS
+          - target: darwin-amd64
+            runner: macos-15-intel
+            macro: PANDATRAN_MACOS
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm
+            macro: PANDATRAN_LINUX
+          - target: linux-amd64
+            runner: ubuntu-22.04
+            macro: PANDATRAN_LINUX
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 54c1551b95ebe9780078a90d17fbc896c64731f9
+          persist-credentials: false
+      - name: Build and verify Pandatran
+        shell: bash
+        env:
+          PANDATRAN_MACRO: ${{ matrix.macro }}
+          PANDATRAN_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          compiler=gfortran
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            export SDKROOT="$(xcrun --show-sdk-path)"
+            export MACOSX_DEPLOYMENT_TARGET=15.0
+            for candidate in gfortran-14 gfortran-15 gfortran-16 gfortran; do
+              if command -v "$candidate" >/dev/null; then compiler="$candidate"; break; fi
+            done
+            if ! command -v "$compiler" >/dev/null; then brew install gcc; fi
+            linker=(-Wl,-dead_strip_dylibs)
+          else
+            if ! command -v "$compiler" >/dev/null; then
+              sudo apt-get update
+              sudo apt-get install -y gfortran
+            fi
+            linker=(-Wl,--as-needed)
+          fi
+          quadmath="$("$compiler" -print-file-name=libquadmath.a)"
+          test -f "$quadmath"
+          libraries=("$quadmath")
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            fortran_runtime="$("$compiler" -print-file-name=libgfortran.a)"
+            test -f "$fortran_runtime"
+            libraries=(-Wl,--start-group "$fortran_runtime" "$quadmath" -Wl,--end-group)
+          fi
+          flags=(-O3 -funroll-loops -fcoarray=single -fPIC -fimplicit-none -Werror=implicit-interface -ffree-form -cpp "-D$PANDATRAN_MACRO")
+          link_flags=(-static-libgfortran -static-libgcc "${linker[@]}")
+          build="$RUNNER_TEMP/pandatran-build"
+          destination="$RUNNER_TEMP/release-out"
+          mkdir -p "$build/app" "$build/test" "$destination"
+          cd "$build"
+          modules=(pandatran chess_moves chess_hashes chess_positions chess_movegen chess_draws chess_evaluation chess_perft
+                   chess_transpositions chess_search chess_bench uci_clock uci_input uci_session)
+          objects=()
+          for module in "${modules[@]}"; do
+            source="$GITHUB_WORKSPACE/src/$module.f90"
+            if [[ "$module" == uci_input ]]; then source="$GITHUB_WORKSPACE/src/uci_input.F90"; fi
+            "$compiler" "${flags[@]}" -c "$source" -o "$module.o"
+            objects+=("$module.o")
+          done
+          "$compiler" "${flags[@]}" "${link_flags[@]}" "$GITHUB_WORKSPACE/app/main.f90" "${objects[@]}" "${libraries[@]}" -o app/pandatran
+          for source in "$GITHUB_WORKSPACE"/test/*.f90; do
+            test_name="$(basename "$source" .f90)"
+            "$compiler" "${flags[@]}" "${link_flags[@]}" "$source" "${objects[@]}" "${libraries[@]}" -o "test/$test_name"
+            "test/$test_name"
+          done
+
+          ./app/pandatran bench 6 > bench-depth6.txt
+          cmp bench-depth6.txt "$GITHUB_WORKSPACE/benchmarks/quiet-history-depth6.txt"
+          test "$(./app/pandatran perft 5)" = "Nodes searched: 4865609"
+          printf 'uci\nisready\nquit\n' | ./app/pandatran > uci.txt
+          grep -Fx 'id name Pandatran' uci.txt
+          grep -Fx 'uciok' uci.txt
+          grep -Fx 'readyok' uci.txt
+          {
+            printf 'source_commit=%s\n' "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"
+            printf 'target=%s\n' "$PANDATRAN_TARGET"
+            printf 'compiler=%s\n' "$("$compiler" --version | head -1)"
+            printf 'flags=%s\n' "${flags[*]}"
+            printf 'link_flags=%s\n' "${link_flags[*]}"
+            printf 'runner_system=%s\n' "$(uname -smr)"
+            if [[ "$RUNNER_OS" == macOS ]]; then
+              printf 'minimum_macos=%s\n' "$MACOSX_DEPLOYMENT_TARGET"
+              otool -L ./app/pandatran > "$destination/runtime.txt"
+            else
+              getconf GNU_LIBC_VERSION > "$destination/glibc.txt"
+              ldd ./app/pandatran > "$destination/runtime.txt"
+            fi
+            file ./app/pandatran
+          } > "$destination/build.txt"
+          if grep -Eq 'lib(gfortran|quadmath|gcc_s)' "$destination/runtime.txt"; then
+            cat "$destination/runtime.txt"
+            exit 1
+          fi
+          cp app/pandatran bench-depth6.txt uci.txt "$destination/"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: pandatran-${{ matrix.target }}
+          path: ${{ runner.temp }}/release-out
+          if-no-files-found: error
+          retention-days: 14
