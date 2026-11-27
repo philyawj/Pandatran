@@ -2,7 +2,9 @@
 
 Can a chess engine written in a language introduced in 1957 beat our chess engine written in a language introduced in 2009?
 
-Pandatran is a from-scratch chess engine project in modern Fortran. The goal is to beat [Pandafish v1.0](https://github.com/philyawj/Pandafish/releases/tag/v1.0) in paired games on the same Raspberry Pi, with equal clocks and resource limits.
+Pandatran is a from-scratch chess engine project in modern Fortran. It tests whether Pandatran can beat frozen Pandafish v1.0 in paired games on the same hardware with equal clocks and resource limits. [Pandafish v1.0](https://github.com/philyawj/Pandafish/releases/tag/v1.0)
+
+In the first confirmation on an M2 Mac, Pandatran scored **77.0% at `5+0.05` and 85.0% at `10+0.1`** over 208 games. The paired 95% confidence intervals cleared 50% at both clocks. Raspberry Pi is the target for a separate run. [Confirmation report](benchmarks/CONFIRMATION.md)
 
 The engine speaks UCI and uses classical search with phase-interpolated evaluation. Project-owned engine code, tests, and tools are written in Fortran. Lichess-bot play is a later checkpoint.
 
