@@ -1,6 +1,6 @@
 # Benchmark setup
 
-The first formal Pandafish match is recorded in the [step 10 confirmation report](CONFIRMATION.md).
+The first formal Pandafish match is recorded in the [step 10 confirmation report](CONFIRMATION.md). Follow the next benchmark in [Stockfish calibration](STOCKFISH.md). Review deferred changes, rejected changes, and setup issues in the [experiment log](../EXPERIMENTS.MD).
 
 ## Checkpoint 1 baseline
 
@@ -41,6 +41,8 @@ gfortran -isysroot "$SDKROOT" fpm-bootstrap.o -o fpm
 Reserve the 8-move Stockfish book for confirmation. Its source archive `8moves_v3.pgn.zip` is pinned at `2ec69181c0b1367c5c58bcf5304a79c7b198b655` (CC0-1.0, SHA-256 `7e1e9dd118b4bb97d8a8b5b8a790c86e21f8509d59a27d2883767d94477be02e`). Replay the games in file order and compare their four-field EPD positions. Exclude any game that reaches a development position or shares its four-ply position with one of the development lines. Retain the first occurrence of each remaining 16-ply position as one EPD line. This kept 27,207 of 34,700 positions, hashed as `0967bf9d2faa523b16e8f1c6370e02779ff6ca9ba2853a116df46bf02822962b`. The reserved pool lives in the ignored local artifact directory. Select the final sample with its own recorded seed and match budget, and verify separation from any later development or training data before freezing it. [Pinned Stockfish book and license](https://github.com/official-stockfish/books/tree/2ec69181c0b1367c5c58bcf5304a79c7b198b655)
 
 Checkpoint 7 added six lines to the development exclusions. Use the resulting 21,098-position reserve, described in [checkpoint 7](#checkpoint-7-classical-evaluation), as the starting pool for subsequent exclusions.
+
+After the first Pandafish confirmation and the exchange-pruning retest, the next confirmation starts with the 18,678-position [updated reserve](STOCKFISH.md#fresh-development-starts).
 
 ## Reproduce the local pilot
 
