@@ -1,70 +1,141 @@
 module chess_search
   use, intrinsic :: iso_fortran_env, only: int32, int64
-  use chess_moves, only: white, pawn, knight, bishop, rook, queen, king
+  use chess_moves, only: white, pawn, knight, bishop, rook, queen, king, move_from, move_to, move_promotion
   use chess_movegen, only: generate_legal, in_check, move_list
   use chess_positions, only: position, undo_state, make_move, unmake_move
+  use chess_draws, only: position_history, push_position, pop_position, claimable_draw, automatic_draw, &
+    possible_intended_claim
   implicit none
   private
 
   integer, parameter, public :: max_search_depth = 64, mate_score = 30000
-  integer, parameter :: infinity = 32000
+  integer, parameter :: quiet_limit = 10, max_quiescence = 16, infinity = 32000
+  integer, parameter, public :: mate_threshold = mate_score - max_search_depth - max_quiescence
   integer, parameter :: piece_value(6) = [100, 320, 330, 500, 900, 0]
 
-  type, abstract, public :: search_control
+  type, public :: search_control
     integer(int64) :: nodes = 0, node_limit = huge(0_int64)
     logical :: interrupted = .false.
   contains
-    procedure(check_interrupt), deferred :: cancelled
+    procedure :: cancelled => uninterruptible
   end type search_control
 
+  type, public :: search_result
+    integer(int32) :: move = 0
+    integer :: depth = 0, score = 0
+  end type search_result
+
   abstract interface
-    logical function check_interrupt(control) result(stopped)
-      import :: search_control
-      class(search_control), intent(inout) :: control
-    end function check_interrupt
+    subroutine report_progress(result, nodes)
+      import :: search_result, int64
+      type(search_result), intent(in) :: result
+      integer(int64), intent(in) :: nodes
+    end subroutine report_progress
   end interface
 
-  public :: search_depth
+  public :: iterative_search
 
 contains
 
-  subroutine search_depth(pos, roots, depth, control, best_move, best_score)
+  logical function uninterruptible(control) result(stopped)
+    class(search_control), intent(inout) :: control
+    stopped = control%interrupted
+  end function uninterruptible
+
+  subroutine iterative_search(pos, history, roots, depth_limit, control, result, on_depth)
     type(position), intent(inout) :: pos
+    type(position_history), intent(inout) :: history
+    type(move_list), intent(in) :: roots
+    integer, intent(in) :: depth_limit
+    class(search_control), intent(inout) :: control
+    type(search_result), intent(out) :: result
+    procedure(report_progress), optional :: on_depth
+    type(search_result) :: candidate
+    integer :: depth
+
+    control%nodes = 0
+    control%interrupted = .false.
+    result = search_result()
+    if (roots%count == 0) then
+      if (in_check(pos, pos%turn)) result%score = -mate_score
+      return
+    end if
+    result%move = roots%moves(1)
+    if (automatic_draw(pos, history)) then
+      result%depth = 1
+      if (present(on_depth)) call on_depth(result, control%nodes)
+      return
+    end if
+
+    do depth = 1, depth_limit
+      if (control%cancelled()) exit
+      candidate%depth = depth
+      call search_depth(pos, history, roots, depth, control, candidate)
+      if (control%interrupted) exit
+      result = candidate
+      if (present(on_depth)) call on_depth(result, control%nodes)
+      if (control%nodes >= control%node_limit) exit
+      if (abs(result%score) >= mate_threshold) then
+        if (mate_score - abs(result%score) <= depth) exit
+      end if
+    end do
+  end subroutine iterative_search
+
+  subroutine search_depth(pos, history, roots, depth, control, result)
+    type(position), intent(inout) :: pos
+    type(position_history), intent(inout) :: history
     type(move_list), intent(in) :: roots
     integer, intent(in) :: depth
     class(search_control), intent(inout) :: control
-    integer(int32), intent(out) :: best_move
-    integer, intent(out) :: best_score
-    type(undo_state) :: undo
+    type(search_result), intent(inout) :: result
     integer :: i, score
 
-    best_score = -infinity
-    best_move = roots%moves(1)
+    result%score = -infinity
+    result%move = roots%moves(1)
     do i = 1, roots%count
       if (control%cancelled()) then
         control%interrupted = .true.
         return
       end if
-      call make_move(pos, roots%moves(i), undo)
-      score = -negamax(pos, depth - 1, 1, -infinity, -best_score, control)
-      call unmake_move(pos, roots%moves(i), undo)
+      score = search_move(pos, history, roots%moves(i), depth - 1, 1, result%score, infinity, control)
       if (control%interrupted) return
-      if (score > best_score) then
-        best_score = score
-        best_move = roots%moves(i)
+      if (score > result%score) then
+        result%score = score
+        result%move = roots%moves(i)
       end if
     end do
   end subroutine search_depth
 
-  recursive integer function negamax(pos, depth, ply, alpha, beta, control) result(score)
+  recursive integer function search_move(pos, history, move, depth, ply, alpha, beta, control) result(score)
     type(position), intent(inout) :: pos
+    type(position_history), intent(inout) :: history
+    integer(int32), intent(in) :: move
     integer, intent(in) :: depth, ply, alpha, beta
     class(search_control), intent(inout) :: control
     type(undo_state) :: undo
+    logical :: can_claim
+
+    call make_move(pos, move, undo)
+    call push_position(pos, history)
+    score = -negamax(pos, history, depth, ply, -beta, -alpha, control, can_claim)
+    call pop_position(history)
+    call unmake_move(pos, move, undo)
+    ! Before playing this move the mover could instead claim the draw it creates.
+    if (can_claim) score = max(score, 0)
+  end function search_move
+
+  recursive integer function negamax(pos, history, depth, ply, alpha, beta, control, can_claim) result(score)
+    type(position), intent(inout) :: pos
+    type(position_history), intent(inout) :: history
+    integer, intent(in) :: depth, ply, alpha, beta
+    class(search_control), intent(inout) :: control
+    logical, intent(out) :: can_claim
     type(move_list) :: legal
+    logical :: quiescence, checked, stand_pat
     integer :: i, child, bound
 
     score = 0
+    can_claim = .false.
     if (control%nodes >= control%node_limit) then
       control%interrupted = .true.
       return
@@ -81,23 +152,93 @@ contains
       if (in_check(pos, pos%turn)) score = ply - mate_score
       return
     end if
-    if (depth == 0) then
-      score = evaluate(pos)
-      return
-    end if
+    if (automatic_draw(pos, history)) return
+    can_claim = claimable_draw(pos, history)
 
-    bound = alpha
+    quiescence = depth <= 0
+    checked = .false.
+    if (quiescence) checked = in_check(pos, pos%turn)
+    stand_pat = quiescence .and. .not. checked
     score = -infinity
+    if (stand_pat .or. depth <= -max_quiescence) score = evaluate(pos)
+    if (can_claim) score = max(score, 0)
+
+    if (stand_pat .and. score < 0) then
+      if (possible_intended_claim(pos, history)) then
+        if (quiet_claim(pos, history, legal)) score = 0
+      end if
+    end if
+    if (score >= beta .or. depth <= -max_quiescence) return
+    if (stand_pat .and. depth <= -quiet_limit) return
+    if (quiescence) call order_quiescence(pos, legal, checked)
+    bound = max(alpha, score)
     do i = 1, legal%count
-      call make_move(pos, legal%moves(i), undo)
-      child = -negamax(pos, depth - 1, ply + 1, -beta, -bound, control)
-      call unmake_move(pos, legal%moves(i), undo)
+      child = search_move(pos, history, legal%moves(i), depth - 1, ply + 1, bound, beta, control)
       if (control%interrupted) return
       score = max(score, child)
       if (score >= beta) return
       bound = max(bound, score)
     end do
   end function negamax
+
+  logical function quiet_claim(pos, history, legal) result(found)
+    type(position), intent(inout) :: pos
+    type(position_history), intent(inout) :: history
+    type(move_list), intent(in) :: legal
+    type(undo_state) :: undo
+    integer(int32) :: move
+    integer :: i
+
+    do i = 1, legal%count
+      move = legal%moves(i)
+      if (abs(pos%board(move_from(move))) == pawn .or. pos%board(move_to(move)) /= 0) cycle
+      call make_move(pos, move, undo)
+      call push_position(pos, history)
+      found = claimable_draw(pos, history)
+      call pop_position(history)
+      call unmake_move(pos, move, undo)
+      if (found) return
+    end do
+    found = .false.
+  end function quiet_claim
+
+  subroutine order_quiescence(pos, legal, checked)
+    type(position), intent(in) :: pos
+    type(move_list), intent(inout) :: legal
+    logical, intent(in) :: checked
+    integer :: priorities(size(legal%moves))
+    integer :: i, j, count, from, target, attacker, victim, promotion, priority
+    integer(int32) :: move
+    integer, parameter :: values(0:6) = [0, piece_value]
+
+    count = 0
+    do i = 1, legal%count
+      move = legal%moves(i)
+      from = move_from(move)
+      target = move_to(move)
+      attacker = abs(pos%board(from))
+      victim = abs(pos%board(target))
+      if (target == pos%ep .and. attacker == pawn) victim = pawn
+      promotion = move_promotion(move)
+      if (victim == 0 .and. promotion == 0) then
+        if (.not. checked) cycle
+        priority = -infinity
+      else
+        priority = 16 * (values(victim) + values(promotion)) - values(attacker)
+      end if
+      j = count
+      do while (j > 0)
+        if (priorities(j) >= priority) exit
+        priorities(j + 1) = priorities(j)
+        legal%moves(j + 1) = legal%moves(j)
+        j = j - 1
+      end do
+      priorities(j + 1) = priority
+      legal%moves(j + 1) = move
+      count = count + 1
+    end do
+    legal%count = count
+  end subroutine order_quiescence
 
   pure integer function evaluate(pos) result(score)
     type(position), intent(in) :: pos

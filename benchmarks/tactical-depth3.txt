@@ -1,0 +1,7 @@
+case=start move=b1c3 score=24 depth=3 nodes=1122
+case=kiwipete move=e2a6 score=-11 depth=3 nodes=2005109
+case=rook-endgame move=b4f4 score=124 depth=3 nodes=1124
+case=recapture move=f2e3 score=297 depth=3 nodes=1318
+case=quiet-evasion move=b1b5 score=411 depth=3 nodes=582
+case=mate-in-one move=f7g7 score=29999 depth=1 nodes=28
+case=dead-bishops move=c1b2 score=0 depth=1 nodes=0

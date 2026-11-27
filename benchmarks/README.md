@@ -114,3 +114,47 @@ fastchess -engine cmd="$pandatran" name=Pandatran \
   -config outname="$results/pandafish.json" \
   -pgnout file="$results/pandafish.pgn" append=false
 ```
+
+## Checkpoint 4 tactical baseline
+
+The depth search uses quiescence for captures, en passant, and all promotions. In check it searches legal evasions, including quiet ones. Tactical moves are ordered by victim, promotion, and attacker value. Ordinary quiescence is capped at ten plies, with up to six more for check evasions. At the absolute cap, after terminal and automatic draw checks, the evaluator supplies the fallback even if the side is in check. The bench includes a poisoned capture, a quiet evasion, mate in one, and a dead-material case alongside the standard positions. [Quiescence search reference](https://chessprogramming.org/Quiescence_Search)
+
+- **Draws in search.** Threefold repetition and 100 halfmoves make zero available as a claim, including claims by an intended move. The search can still prefer a win. Fivefold repetition, 150 halfmoves, and recognized dead material score zero automatically. Mate is evaluated before draw thresholds. Recognized dead material covers bare kings, a single bishop or knight, and bishops confined to one square color. Repetition compares exact positions, including the turn, castling rights and the availability of a legal en passant capture. A FEN without its move history supplies a single occurrence. [FIDE Laws, articles 5 and 9](https://handbook.fide.com/chapter/E012023)
+- **Draws in a match.** UCI has no draw-claim command, so the engine returns a legal move from a playable root. The pinned fastchess runner ends games when a position qualifies for threefold repetition, the fifty-move rule, or insufficient material. These match settings use rule endings without score-based adjudication. Checkmate takes precedence on the move that reaches the runner’s move-count threshold. The Fortran fixtures test the engine’s optional claims, automatic thresholds, and this precedence separately. [fastchess release](https://github.com/Disservin/fastchess/releases/tag/v1.8.3-alpha)
+
+The seven-case [depth-three baseline](tactical-depth3.txt) records centipawn scores below the mate range. In the mate range, the magnitude is 30,000 minus plies to mate. The fixed-node run at 4,096 nodes per position also reproduced byte-for-byte. Kiwipete exhausted that limit before finishing depth one. Its depth-zero entry records a legal fallback and a placeholder score. Both variants use the same iterative driver as UCI.
+
+```sh
+"$pandatran" bench | diff -u benchmarks/tactical-depth3.txt -
+"$pandatran" bench 3 4096
+```
+
+Debug, release, and runtime-check builds passed, including the Fortran pipe and tactical fixtures. Cases include quiet and capture quiescence, mate distances, 99/100 and 149/150 halfmoves, legal and pinned en passant for repetition, castling-right changes, and cancellation with state restoration. The build passed all 40 fastchess compliance checks.
+
+### Timed baseline
+
+Both matches ran on the Apple M2 Mac with five color-swapped opening pairs, `5+0.05`, and one concurrent game. The checkpoint 4 binary SHA-256 was `da924829e1fb803ae8dd04b0ef5b7e49c81b5b9921fa24e1d0d01f937b3893c1`. The control for the first row was the exact checkpoint 3 binary recorded above. The second row used the frozen Pandafish v1.0 release.
+
+| Opponent | Pairs | Pandatran W/D/L | Score | Forfeits |
+| --- | --- | --- | --- | --- |
+| Checkpoint 3 Pandatran | 5 | 9/1/0 | 95% | 0 |
+| Frozen Pandafish v1.0 | 5 | 0/0/10 | 0% | 0 |
+
+Independent replay verified every opening pair and result across 1,627 plies. Nineteen games ended in checkmate and one in threefold repetition. These are development screens on five openings. Kiwipete took 15,776 nodes to complete depth one in the uncapped bench, which gives the next optimization checkpoint a reproducible workload.
+
+Raw PGNs, runner configurations, compliance output, and the replay summary are under `.local/checkpoint-04/`.
+
+| PGN | SHA-256 |
+| --- | --- |
+| `checkpoint-03.pgn` | `8bdfc76dcb49fbbad860115c43e161b3d7689c80ca942957096e445d45cfa848` |
+| `pandafish.pgn` | `ef5faf261083c5c44564fe32cfba83bc553c92e02ae323374a53dd12568134b3` |
+
+```sh
+fastchess -engine cmd="$pandatran" name=Pandatran-cp4 \
+  -engine cmd="$opponent" name="$opponent_name" \
+  -each tc=5+0.05 timemargin=0 restart=on \
+  -openings file="$PWD/benchmarks/development.epd" format=epd order=sequential \
+  -rounds 5 -repeat -concurrency 1 -strict -autosaveinterval 0 \
+  -config outname="$results/$match.json" \
+  -pgnout file="$results/$match.pgn" append=false
+```

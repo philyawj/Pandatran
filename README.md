@@ -25,7 +25,10 @@ The executable also counts legal move paths from the standard start or a six-fie
 fpm test
 fpm run --profile release -- perft 5
 fpm run --profile release -- divide 3 "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1"
+fpm run --profile release -- bench
 ```
+
+The deterministic bench reports each position’s move, score, completed depth, and node count. Pass `bench 3 4096` for a depth-three run capped at 4,096 nodes per position.
 
 - [Initial research](INITIAL_RESEARCH.MD)
 - [Implementation plan](IMPLEMENTATION_PLAN.MD)
