@@ -1,7 +1,7 @@
 module chess_search
   use, intrinsic :: iso_fortran_env, only: int16, int32, int64
   use chess_moves, only: white, pawn, knight, bishop, rook, queen, king, move_from, move_to, move_promotion
-  use chess_movegen, only: generate_legal, in_check, move_list
+  use chess_movegen, only: generate_legal, has_legal_move, in_check, move_list
   use chess_positions, only: position, undo_state, make_move, unmake_move
   use chess_draws, only: position_history, push_position, pop_position, claimable_draw, automatic_draw, &
     possible_intended_claim, history_key, repetitions, claim_halfmoves
@@ -14,8 +14,8 @@ module chess_search
   integer, parameter :: quiet_limit = 10, max_quiescence = 16, infinity = 32000
   integer, parameter, public :: mate_threshold = mate_score - max_search_depth - max_quiescence
   integer, parameter, public :: plain_mode = 0, order_mode = 1, table_mode = 2, pvs_mode = 3, aspiration_mode = 4
-  integer, parameter, public :: lmr_mode = 5, history_mode = 6
-  integer, parameter, public :: default_mode = history_mode
+  integer, parameter, public :: lmr_mode = 5, history_mode = 6, staged_mode = 7
+  integer, parameter, public :: default_mode = staged_mode
   integer, parameter :: aspiration_width = 40
   integer, parameter :: quiet_history_limit = 1024
 
@@ -79,7 +79,7 @@ contains
     control%reduced_researches = 0
     control%interrupted = .false.
     result = search_result()
-    if (control%mode == history_mode) control%quiet_history = 0
+    if (control%mode >= history_mode) control%quiet_history = 0
     if (roots%count == 0) then
       if (in_check(pos, pos%turn)) result%score = -mate_score
       return
@@ -199,7 +199,7 @@ contains
     class(search_control), intent(inout) :: control
     logical, intent(out) :: can_claim
     type(move_list) :: legal
-    logical :: quiescence, checked, stand_pat, cache, hit, selective, reduce, quiet
+    logical :: quiescence, checked, stand_pat, tactical_pending, cache, hit, selective, reduce, quiet
     integer :: i, child, bound, quiet_searched
     integer(int32) :: hint, best_move
     integer(int16) :: result_bound
@@ -231,31 +231,43 @@ contains
       end if
       score = 0
     end if
-    call generate_legal(pos, legal)
-    if (legal%count == 0) then
-      if (in_check(pos, pos%turn)) score = ply - mate_score
-      return
+    checked = .false.
+    if (quiescence) checked = in_check(pos, pos%turn)
+    stand_pat = quiescence .and. .not. checked
+    tactical_pending = stand_pat .and. control%mode == staged_mode
+    if (tactical_pending) then
+      if (.not. has_legal_move(pos)) return ! Stalemate
+    else
+      call generate_legal(pos, legal)
+      if (legal%count == 0) then
+        if (quiescence) then
+          if (checked) score = ply - mate_score
+        else if (in_check(pos, pos%turn)) then
+          score = ply - mate_score
+        end if
+        return
+      end if
     end if
     if (automatic_draw(pos, history)) return
     can_claim = claimable_draw(pos, history)
     selective = .false.
     if (control%mode >= lmr_mode) selective = selective_node(pos, history, depth, alpha, beta)
 
-    checked = .false.
-    if (quiescence) checked = in_check(pos, pos%turn)
-    stand_pat = quiescence .and. .not. checked
     score = -infinity
     if (stand_pat .or. depth <= -max_quiescence) score = evaluate(pos, control%evaluation)
     if (can_claim) score = max(score, 0)
 
     if (stand_pat .and. score < 0) then
       if (possible_intended_claim(pos, history)) then
+        if (tactical_pending) call generate_legal(pos, legal)
+        tactical_pending = .false.
         if (quiet_claim(pos, history, legal)) score = 0
       end if
     end if
     if (score >= beta .or. depth <= -max_quiescence) return
     if (stand_pat .and. depth <= -quiet_limit) return
     if (quiescence) then
+      if (tactical_pending) call generate_legal(pos, legal, tactical_only=.true.)
       call order_moves(pos, legal, checked, 0_int32)
     else if (control%mode >= order_mode) then
       call order_main_moves(pos, legal, hint, control)
@@ -278,7 +290,7 @@ contains
         best_move = legal%moves(i)
       end if
       if (score >= beta) then
-        if (control%mode == history_mode .and. depth >= 2) &
+        if (control%mode >= history_mode .and. depth >= 2) &
           call learn_quiet_cutoff(pos, legal%moves(:i), depth, control%quiet_history(:, :, pos%turn))
         exit
       end if
@@ -348,7 +360,7 @@ contains
     integer(int32), intent(in) :: hint
     class(search_control), intent(in) :: control
 
-    if (control%mode == history_mode) then
+    if (control%mode >= history_mode) then
       call order_moves(pos, legal, .true., hint, control%quiet_history(:, :, pos%turn))
     else
       call order_moves(pos, legal, .true., hint)

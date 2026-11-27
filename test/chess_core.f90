@@ -73,6 +73,7 @@ program chess_core
   call expect_move('k3r3/8/8/8/8/8/4R3/4K3 w - - 0 1', 'e2e3', .true.)
   call load('1r2k3/P7/8/8/8/8/8/4K3 w - - 0 1', pos)
   call generate_legal(pos, list)
+  call check_stages(pos, list, 'quiet and capture promotions')
   do i = knight, queen
     call require(any(list%moves(:list%count) == pack_move(48, 56, i)), 'missing quiet promotion')
     call require(any(list%moves(:list%count) == pack_move(48, 57, i)), 'missing capture promotion')
@@ -150,6 +151,7 @@ contains
     valid = parse_move(text, packed)
     call require(valid, 'Bad test move: ' // text)
     call generate_legal(current, legal)
+    call check_stages(current, legal, text)
     found = any(legal%moves(:legal%count) == packed)
     call require(found .eqv. expected, 'Wrong legality for ' // text // ' in ' // fen)
     call same_state(current, before, 'generation changed state for ' // text)
@@ -183,6 +185,7 @@ contains
 
     call load(fen, current)
     call generate_legal(current, legal)
+    call check_stages(current, legal, fen)
     call require(legal%count == 0, 'legal moves in terminal FEN: ' // fen)
     call require(in_check(current, current%turn) .eqv. checked, 'wrong terminal check state: ' // fen)
     nodes = perft(current, 1)
@@ -247,6 +250,7 @@ contains
       do ply = 1, length
         write (context, '("walk ",i0," ply ",i0," seed ",i0)') game, ply, seed
         call generate_legal(current, legal)
+        call check_stages(current, legal, trim(context))
         call same_state(current, snapshots(ply - 1), trim(context) // ' generate')
         if (legal%count == 0) exit
         seed = modulo(48271_int64 * seed, 2147483647_int64)
@@ -265,6 +269,35 @@ contains
       end do
     end do
   end subroutine walk
+
+  subroutine check_stages(current, legal, label)
+    type(position), intent(inout) :: current
+    type(move_list), intent(in) :: legal
+    character(len=*), intent(in) :: label
+    type(position) :: before
+    type(move_list) :: tactical
+    logical :: capture
+    integer :: index, expected, from, to
+    integer(int32) :: candidate
+
+    before = current
+    call require(has_legal_move(current) .eqv. (legal%count > 0), label // ' legal-move probe')
+    call same_state(current, before, label // ' probe restores position')
+    call generate_legal(current, tactical, tactical_only=.true.)
+    call same_state(current, before, label // ' tactical generation restores position')
+    expected = 0
+    do index = 1, legal%count
+      candidate = legal%moves(index)
+      from = move_from(candidate)
+      to = move_to(candidate)
+      capture = current%board(to) /= 0 .or. (to == current%ep .and. abs(current%board(from)) == pawn)
+      if (.not. capture .and. move_promotion(candidate) == 0) cycle
+      expected = expected + 1
+      call require(expected <= tactical%count, label // ' tactical move missing')
+      call require(tactical%moves(expected) == candidate, label // ' tactical order differs')
+    end do
+    call require(tactical%count == expected, label // ' extra tactical moves')
+  end subroutine check_stages
 
   subroutine check_bitboards(current, label)
     type(position), intent(in) :: current

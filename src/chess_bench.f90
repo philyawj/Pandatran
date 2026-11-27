@@ -6,7 +6,7 @@ module chess_bench
   use chess_evaluation, only: evaluate
   use chess_draws, only: position_history, reset_history
   use chess_search, only: iterative_search, search_control, search_result, &
-    plain_mode, order_mode, table_mode, pvs_mode, aspiration_mode, default_mode, lmr_mode, history_mode
+    plain_mode, order_mode, table_mode, pvs_mode, aspiration_mode, default_mode, lmr_mode, history_mode, staged_mode
   implicit none
   private
   public :: run_bench, bench_mode, run_eval_bench
@@ -47,6 +47,8 @@ contains
       mode = lmr_mode
     case ('history')
       mode = history_mode
+    case ('staged')
+      mode = staged_mode
     case default
       mode = -1
     end select
@@ -77,7 +79,7 @@ contains
       write (*, '(3a,a,a,i0,a,i0,a,i0)', advance='no') 'case=', trim(suite(i)%name), ' move=', trim(move), &
         ' score=', result%score, ' depth=', result%depth, ' nodes=', control%nodes
       select case (mode)
-      case (lmr_mode, history_mode)
+      case (lmr_mode, history_mode, staged_mode)
         write (*, '(a,i0,a,i0)') ' reductions=', control%reductions, ' retries=', control%reduced_researches
       case default
         write (*, '(a)') ''
